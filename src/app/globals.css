@@ -1,26 +1,82 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  --color-surface: var(--card);
+  --color-surface-muted: var(--background);
+  --color-border-subtle: var(--border);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--muted);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --font-sans: var(--font-sans), "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-display), Fraunces, ui-serif, Georgia, serif;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+:root {
+  --background: #eef2f4;
+  --card: #ffffff;
+  --ink: #0b1220;
+  --muted: #4b5c6b;
+  --border: #d5dde4;
+  --accent: #0c7a66;
+  --accent-strong: #086554;
+  --foreground: var(--ink);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #0a0f14;
+    --card: #151c24;
+    --ink: #f4f7fa;
+    --muted: #a8b6c4;
+    --border: #2a3540;
+    --accent: #3dceb0;
+    --accent-strong: #7aebcf;
+    --foreground: var(--ink);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background:
+      radial-gradient(1200px 500px at 10% -10%, color-mix(in oklab, var(--accent) 12%, transparent), transparent 55%),
+      radial-gradient(900px 420px at 100% 0%, color-mix(in oklab, #4a7eb0 10%, transparent), transparent 50%),
+      var(--background);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  h1,
+  h2,
+  h3 {
+    color: var(--ink);
+  }
+
+  @media (pointer: coarse) {
+    button,
+    a[role="button"],
+    [role="tab"] {
+      min-height: 44px;
+    }
+  }
+}
+
+@utility card-surface {
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+
+@utility scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
