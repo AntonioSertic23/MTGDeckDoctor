@@ -86,6 +86,16 @@ This repo includes `netlify.toml` and `@netlify/plugin-nextjs`.
 
 If the badge still says **Local**, the env vars were missing at build time — fix them and redeploy.
 
+## Install as an app (PWA)
+
+The site is installable on phone/desktop when served over HTTPS (Netlify):
+
+- **Android / Chrome:** browser menu → **Install app** / **Add to Home screen**
+- **iPhone Safari:** Share → **Add to Home Screen**
+- **Desktop Chrome/Edge:** install icon in the address bar
+
+It uses a web app manifest + service worker (`public/sw.js`). Install works in production builds; local `next dev` does not register the worker.
+
 ## Product spec
 
 See [MTG_Deck_Doctor_Product_Requirements.md](./MTG_Deck_Doctor_Product_Requirements.md).
