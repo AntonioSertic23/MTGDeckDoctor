@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Fraunces, Source_Sans_3 } from "next/font/google";
 import { AppShell } from "@/components/app-shell";
+import { AuthProvider } from "@/lib/auth/auth-provider";
 import "./globals.css";
 
 const display = Fraunces({
@@ -37,7 +38,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en" className={`${display.variable} ${sans.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col font-sans">
-        <AppShell>{children}</AppShell>
+        <AuthProvider>
+          <AppShell>{children}</AppShell>
+        </AuthProvider>
       </body>
     </html>
   );

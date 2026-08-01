@@ -1,10 +1,11 @@
 -- MTG Deck Doctor — Supabase schema
 -- Run this in the Supabase SQL Editor (Dashboard → SQL → New query).
--- Also enable Anonymous sign-ins: Authentication → Providers → Anonymous → Enable.
+-- Enable Email auth: Authentication → Providers → Email.
+-- Set Site URL to your app (localhost or Netlify) under Authentication → URL configuration.
 
 create extension if not exists "pgcrypto";
 
--- Shared Scryfall card cache (readable/writable by any signed-in user, including anonymous).
+-- Shared Scryfall card cache (readable/writable by any signed-in user).
 create table if not exists public.cards (
   oracle_id text primary key,
   scryfall_id text not null,

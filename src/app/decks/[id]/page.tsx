@@ -95,7 +95,7 @@ export default function DeckDetailPage() {
   if (!deck) {
     return (
       <div className="space-y-3">
-        <p className="text-sm text-muted">Deck not found in this browser.</p>
+        <p className="text-sm text-muted">Deck not found.</p>
         <Link href="/decks" className={buttonClassName("secondary")}>
           Back to decks
         </Link>
@@ -109,7 +109,7 @@ export default function DeckDetailPage() {
 
   function deleteDeck() {
     if (!deck) return;
-    if (!window.confirm(`Delete “${deck.deck.name}”? This only removes it from this browser.`)) return;
+    if (!window.confirm(`Delete “${deck.deck.name}”?`)) return;
     startDelete(async () => {
       await getRepository().deleteDeck(deck.deck.id);
       router.push("/decks");

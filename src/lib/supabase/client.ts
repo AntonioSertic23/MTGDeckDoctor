@@ -1,7 +1,6 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createClient, type Session, type SupabaseClient, type User } from "@supabase/supabase-js";
 
 let client: SupabaseClient | null = null;
-let sessionPromise: Promise<string> | null = null;
 
 /** Publishable (`sb_publishable_…`) or legacy anon JWT — both are safe for the browser. */
 export function getSupabaseAnonKey(): string | undefined {
@@ -36,31 +35,65 @@ export function getSupabaseBrowserClient(): SupabaseClient {
   return client;
 }
 
+export async function getSession(): Promise<Session | null> {
+  const supabase = getSupabaseBrowserClient();
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  return data.session;
+}
+
+export async function getCurrentUser(): Promise<User | null> {
+  const session = await getSession();
+  return session?.user ?? null;
+}
+
 /**
- * Ensures an anonymous Supabase session so RLS can scope decks to this browser
- * without a visible login screen.
+ * Returns the signed-in user's id. Does not create anonymous sessions —
+ * the UI must sign the user in first.
  */
-export async function ensureSupabaseUserId(): Promise<string> {
-  sessionPromise ??= (async () => {
-    const supabase = getSupabaseBrowserClient();
-    const { data: existing, error: existingError } = await supabase.auth.getSession();
-    if (existingError) throw existingError;
-    if (existing.session?.user?.id) return existing.session.user.id;
-
-    const { data, error } = await supabase.auth.signInAnonymously();
-    if (error) {
-      throw new Error(
-        `Supabase anonymous sign-in failed: ${error.message}. Enable Anonymous provider in Authentication → Providers.`,
-      );
-    }
-    if (!data.user?.id) throw new Error("Supabase anonymous sign-in returned no user.");
-    return data.user.id;
-  })();
-
-  try {
-    return await sessionPromise;
-  } catch (error) {
-    sessionPromise = null;
-    throw error;
+export async function requireSupabaseUserId(): Promise<string> {
+  const user = await getCurrentUser();
+  if (!user?.id) {
+    throw new Error("Sign in required to sync decks with your account.");
   }
+  return user.id;
+}
+
+/** @deprecated Use requireSupabaseUserId — kept as alias for repository calls. */
+export async function ensureSupabaseUserId(): Promise<string> {
+  return requireSupabaseUserId();
+}
+
+export async function signInWithPassword(email: string, password: string): Promise<User> {
+  const supabase = getSupabaseBrowserClient();
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: email.trim(),
+    password,
+  });
+  if (error) throw error;
+  if (!data.user) throw new Error("Sign-in returned no user.");
+  return data.user;
+}
+
+export async function signUpWithPassword(email: string, password: string): Promise<{
+  user: User;
+  needsEmailConfirmation: boolean;
+}> {
+  const supabase = getSupabaseBrowserClient();
+  const { data, error } = await supabase.auth.signUp({
+    email: email.trim(),
+    password,
+  });
+  if (error) throw error;
+  if (!data.user) throw new Error("Sign-up returned no user.");
+  return {
+    user: data.user,
+    needsEmailConfirmation: !data.session,
+  };
+}
+
+export async function signOut(): Promise<void> {
+  const supabase = getSupabaseBrowserClient();
+  const { error } = await supabase.auth.signOut();
+  if (error) throw error;
 }
