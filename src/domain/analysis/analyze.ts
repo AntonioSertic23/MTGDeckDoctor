@@ -12,6 +12,7 @@ import { calculateSynergy } from "@/domain/analysis/synergy";
 import { calculateHealth } from "@/domain/analysis/health";
 import { detectProblems } from "@/domain/analysis/problems";
 import { suggestCuts } from "@/domain/recommendations/cuts";
+import { enrichProblemsWithSuggestions } from "@/domain/recommendations/problem-suggestions";
 import { explainDeck } from "@/domain/analysis/explain";
 
 /**
@@ -53,7 +54,12 @@ export function analyzeDeck(resolved: ResolvedDeck): DeckAnalysis {
   const statistics = calculateStatistics(resolved);
   const synergy = calculateSynergy(resolved);
   const health = calculateHealth(statistics, synergy);
-  const problems = detectProblems(resolved, statistics, synergy);
+  const problems = enrichProblemsWithSuggestions(
+    detectProblems(resolved, statistics, synergy),
+    resolved,
+    statistics,
+    synergy,
+  );
   const cuts = suggestCuts(resolved, statistics, synergy, problems);
   const explanation = explainDeck(resolved, statistics, synergy, problems);
 

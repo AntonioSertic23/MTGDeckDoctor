@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useId, useState } from "react";
 import { X } from "lucide-react";
-import { cn } from "@/lib/utils";
+import type { CardPrices } from "@/domain/types";
+import { cn, formatCardPrices } from "@/lib/utils";
 
 type ArtSize = "sm" | "md" | "lg";
 
@@ -32,17 +33,20 @@ function blockClickThrough() {
 export function CardArt({
   name,
   imageUri,
+  prices,
   size = "md",
   className,
 }: {
   name: string;
   imageUri?: string | null;
+  prices?: CardPrices | null;
   size?: ArtSize;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const titleId = useId();
   const dim = SIZE[size];
+  const priceLabel = formatCardPrices(prices);
 
   const close = useCallback(() => {
     setOpen(false);
@@ -91,7 +95,7 @@ export function CardArt({
           "group shrink-0 rounded-lg p-0 text-left transition hover:opacity-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent",
           className,
         )}
-        aria-label={`Enlarge ${name}`}
+        aria-label={`Enlarge ${name}${priceLabel ? `, ${priceLabel}` : ""}`}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
@@ -128,13 +132,18 @@ export function CardArt({
             onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex w-full items-center justify-between gap-3">
-              <h2
-                id={titleId}
-                className="truncate font-[family-name:var(--font-display)] text-lg font-semibold text-white"
-              >
-                {name}
-              </h2>
+            <div className="flex w-full items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2
+                  id={titleId}
+                  className="truncate font-[family-name:var(--font-display)] text-lg font-semibold text-white"
+                >
+                  {name}
+                </h2>
+                <p className="mt-1 text-base font-medium tabular-nums text-white/90">
+                  {priceLabel ?? "Price unavailable"}
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={(event) => {
@@ -142,7 +151,7 @@ export function CardArt({
                   event.stopPropagation();
                   close();
                 }}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
+                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
                 aria-label="Close"
               >
                 <X className="h-5 w-5" />

@@ -209,6 +209,8 @@ export interface Problem {
   evidence: Record<string, number | string>;
   affectedCards: string[];
   suggestedFix?: string;
+  /** Concrete cards that would address this problem (from the staple pool). */
+  suggestions?: AdditionCandidate[];
 }
 
 export type HealthCategoryId =
@@ -273,6 +275,7 @@ export interface CutCandidate {
   cutScore: number;
   reasons: string[];
   imageUri?: string | null;
+  prices?: CardPrices | null;
 }
 
 export interface AdditionCandidate {
@@ -283,6 +286,7 @@ export interface AdditionCandidate {
   score: number;
   reasons: string[];
   imageUri?: string | null;
+  prices?: CardPrices | null;
 }
 
 export interface DeckProfile {

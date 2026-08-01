@@ -1,4 +1,5 @@
-import type { DeckHealth, HealthCategory } from "@/domain/types";
+import type { AdditionCandidate, DeckHealth, HealthCategory, HealthCategoryId } from "@/domain/types";
+import { CardArt } from "@/components/card-art";
 import {
   HEALTH_STATUS_BAR,
   HEALTH_STATUS_LABEL,
@@ -8,7 +9,15 @@ import {
   healthStatus,
 } from "@/lib/utils";
 
-export function HealthMeter({ health, compact = false }: { health: DeckHealth; compact?: boolean }) {
+export function HealthMeter({
+  health,
+  compact = false,
+  suggestionsByCategory,
+}: {
+  health: DeckHealth;
+  compact?: boolean;
+  suggestionsByCategory?: Partial<Record<HealthCategoryId, AdditionCandidate[]>>;
+}) {
   const status = healthStatus(health.overall);
 
   if (compact) {
@@ -60,17 +69,27 @@ export function HealthMeter({ health, compact = false }: { health: DeckHealth; c
 
       <ul className="grid gap-3 sm:grid-cols-2">
         {health.categories.map((category) => (
-          <CategoryRow key={category.id} category={category} />
+          <CategoryRow
+            key={category.id}
+            category={category}
+            suggestions={suggestionsByCategory?.[category.id]}
+          />
         ))}
       </ul>
     </div>
   );
 }
 
-function CategoryRow({ category }: { category: HealthCategory }) {
+function CategoryRow({
+  category,
+  suggestions,
+}: {
+  category: HealthCategory;
+  suggestions?: AdditionCandidate[];
+}) {
   const status = healthStatus(category.score);
   return (
-    <li className="space-y-1.5">
+    <li className="space-y-1.5 rounded-xl border border-[var(--border)] p-3">
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-sm font-medium text-ink">{category.label}</span>
         <span className="text-sm tabular-nums text-muted">{Math.round(category.score)}</span>
@@ -83,6 +102,21 @@ function CategoryRow({ category }: { category: HealthCategory }) {
       </div>
       {category.evidence[0] ? (
         <p className="text-xs leading-snug text-muted">{category.evidence[0]}</p>
+      ) : null}
+      {suggestions && suggestions.length > 0 ? (
+        <div className="pt-1">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Try adding</p>
+          <ul className="mt-1.5 flex gap-2 overflow-x-auto pb-0.5">
+            {suggestions.slice(0, 3).map((card) => (
+              <li key={card.name} className="flex w-[5.5rem] shrink-0 flex-col items-center gap-1 text-center">
+                <CardArt name={card.name} imageUri={card.imageUri} prices={card.prices} size="sm" />
+                <span className="line-clamp-2 text-[10px] font-medium leading-tight text-ink">
+                  {card.name}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
     </li>
   );

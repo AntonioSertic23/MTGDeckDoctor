@@ -28,7 +28,7 @@ export function SharedCardList({
             key={item.oracleId}
             className="flex gap-3 rounded-2xl border border-[var(--border)] p-3"
           >
-            <CardArt name={item.name} imageUri={card?.imageUri} size="md" />
+            <CardArt name={item.name} imageUri={card?.imageUri} prices={card?.prices} size="md" />
             <div className="min-w-0 flex-1">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">

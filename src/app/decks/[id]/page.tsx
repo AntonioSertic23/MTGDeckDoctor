@@ -9,14 +9,14 @@ import { useDeck, useDecksWithCards } from "@/lib/hooks/use-repository";
 import { getRepository } from "@/lib/storage";
 import { buildSharedCardIndex, findSharedCards } from "@/domain/sharing/shared-cards";
 import { HealthMeter } from "@/components/health-meter";
-import { ProblemList } from "@/components/problem-list";
+import { ProblemList, type CardVisual } from "@/components/problem-list";
 import { AdditionList, CutList } from "@/components/recommendation-lists";
 import { SharedCardList } from "@/components/shared-card-list";
 import { Button, buttonClassName, PageHeader, Panel, StatChip } from "@/components/ui";
 import { CardArt } from "@/components/card-art";
 import { CommanderPanel } from "@/components/commander-panel";
 import { exportDecksToFile } from "@/lib/decks/file-io";
-import { cn } from "@/lib/utils";
+import { cn, formatCardPrices } from "@/lib/utils";
 
 const TABS = [
   { id: "overview", label: "Overview" },
@@ -71,17 +71,21 @@ export default function DeckDetailPage() {
   }, [deck, decks, cards, inventory]);
 
   const artByName = useMemo(() => {
-    const map = new Map<string, string | null>();
+    const map = new Map<string, CardVisual>();
     if (!analysis) return map;
     for (const entry of analysis.resolved.entries) {
-      map.set(entry.card.name.toLowerCase(), entry.card.imageUri);
+      const visual: CardVisual = { imageUri: entry.card.imageUri, prices: entry.card.prices };
+      map.set(entry.card.name.toLowerCase(), visual);
       map.set(
         (entry.card.name.split("//")[0] ?? entry.card.name).trim().toLowerCase(),
-        entry.card.imageUri,
+        visual,
       );
     }
     for (const addition of analysis.additions) {
-      map.set(addition.name.toLowerCase(), addition.imageUri ?? null);
+      map.set(addition.name.toLowerCase(), {
+        imageUri: addition.imageUri ?? null,
+        prices: addition.prices ?? null,
+      });
     }
     return map;
   }, [analysis]);
@@ -243,7 +247,10 @@ export default function DeckDetailPage() {
           {tab === "overview" ? (
             <div className="space-y-4">
               <Panel>
-                <HealthMeter health={analysis.analysis.health} />
+                <HealthMeter
+                  health={analysis.analysis.health}
+                  suggestionsByCategory={analysis.healthSuggestions}
+                />
               </Panel>
               {stats ? (
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -267,7 +274,10 @@ export default function DeckDetailPage() {
 
           {tab === "health" ? (
             <Panel>
-              <HealthMeter health={analysis.analysis.health} />
+              <HealthMeter
+                health={analysis.analysis.health}
+                suggestionsByCategory={analysis.healthSuggestions}
+              />
             </Panel>
           ) : null}
 
@@ -348,7 +358,12 @@ export default function DeckDetailPage() {
                       className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] p-3 sm:flex-row"
                     >
                       <div className="mx-auto shrink-0 sm:mx-0">
-                        <CardArt name={entry.card.name} imageUri={entry.card.imageUri} size="lg" />
+                        <CardArt
+                          name={entry.card.name}
+                          imageUri={entry.card.imageUri}
+                          prices={entry.card.prices}
+                          size="lg"
+                        />
                       </div>
                       <div className="min-w-0 flex-1 py-0.5 text-center sm:text-left">
                         <p className="font-medium leading-snug text-ink">
@@ -366,6 +381,9 @@ export default function DeckDetailPage() {
                         </p>
                         <p className="mt-2 text-sm tabular-nums text-ink-muted">
                           {entry.card.manaCost ?? "—"}
+                          {formatCardPrices(entry.card.prices)
+                            ? ` · ${formatCardPrices(entry.card.prices)}`
+                            : null}
                         </p>
                       </div>
                     </li>

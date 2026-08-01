@@ -1,54 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { deckContentKey, getCachedOrAnalyzeDeck } from "@/lib/decks/analyze-local";
+import { useMemo } from "react";
+import { useDeckAnalyses } from "@/lib/hooks/use-deck-analyses";
 import { useDecksWithCards } from "@/lib/hooks/use-repository";
 import { buildSharedCardIndex, findConflicts, findSharedCards } from "@/domain/sharing/shared-cards";
-import { HealthMeter } from "@/components/health-meter";
 import { SharedCardList } from "@/components/shared-card-list";
-import { CardArt } from "@/components/card-art";
-import { buttonClassName, EmptyState, PageHeader, Panel } from "@/components/ui";
+import { buttonClassName, EmptyState, PageHeader, Panel, StatChip } from "@/components/ui";
 import { HEALTH_STATUS_SOFT_BG, cardEurPrice, cn, healthStatus } from "@/lib/utils";
-import type { DeckAnalysis } from "@/domain/types";
 
 export default function DashboardPage() {
   const { decks, cards, inventory, loading, error } = useDecksWithCards();
-  const [scores, setScores] = useState<Record<string, DeckAnalysis>>({});
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function run() {
-      const next: Record<string, DeckAnalysis> = {};
-      // Paint cached scores immediately so Home does not flash "Analyzing…".
-      for (const deck of decks) {
-        const snap = deck.deck.analysisSnapshot;
-        if (snap && snap.contentKey === deckContentKey(deck)) {
-          next[deck.deck.id] = snap.analysis;
-        }
-      }
-      if (!cancelled) setScores({ ...next });
-
-      for (const deck of decks) {
-        if (next[deck.deck.id]) continue;
-        try {
-          const { analysis } = await getCachedOrAnalyzeDeck(deck);
-          next[deck.deck.id] = analysis;
-          if (!cancelled) setScores({ ...next });
-        } catch {
-          // Incomplete card cache — skip until the user re-opens the deck.
-        }
-      }
-    }
-
-    if (decks.length > 0) void run();
-    else setScores({});
-
-    return () => {
-      cancelled = true;
-    };
-  }, [decks]);
+  const scores = useDeckAnalyses(decks);
 
   const shared = useMemo(() => {
     const usage = buildSharedCardIndex(decks, cards, inventory);
@@ -58,7 +21,10 @@ export default function DashboardPage() {
       return eur !== null && eur >= 5;
     });
     return {
-      shared: valuable.slice(0, 5),
+      preview: (findConflicts(usage).length > 0
+        ? findConflicts(usage)
+        : valuable
+      ).slice(0, 4),
       conflicts: findConflicts(usage).filter((item) => {
         const eur = cardEurPrice(cards.get(item.oracleId));
         return eur === null || eur >= 5;
@@ -67,6 +33,42 @@ export default function DashboardPage() {
       valuableCount: valuable.length,
     };
   }, [decks, cards, inventory]);
+
+  const clinic = useMemo(() => {
+    const analyzed = decks
+      .map(({ deck }) => {
+        const analysis = scores[deck.id];
+        if (!analysis) return null;
+        return { deck, analysis, status: healthStatus(analysis.health.overall) };
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null);
+
+    const overallAvg =
+      analyzed.length > 0
+        ? Math.round(
+            analyzed.reduce((sum, row) => sum + row.analysis.health.overall, 0) / analyzed.length,
+          )
+        : null;
+
+    const needingAttention = analyzed
+      .filter((row) => row.status === "critical" || row.status === "observation" || row.status === "attention")
+      .sort((a, b) => a.analysis.health.overall - b.analysis.health.overall);
+
+    const missingCommander = decks.filter((d) => d.deck.commanderOracleIds.length === 0).length;
+    const problemCount = analyzed.reduce((sum, row) => sum + row.analysis.problems.length, 0);
+    const strongest = [...analyzed].sort(
+      (a, b) => b.analysis.health.overall - a.analysis.health.overall,
+    )[0];
+
+    return {
+      analyzedCount: analyzed.length,
+      overallAvg,
+      needingAttention: needingAttention.slice(0, 4),
+      missingCommander,
+      problemCount,
+      strongest,
+    };
+  }, [decks, scores]);
 
   if (loading) {
     return <p className="text-sm text-muted">Opening the clinic…</p>;
@@ -86,7 +88,7 @@ export default function DashboardPage() {
         />
         <EmptyState
           title="No decks on the table"
-          description="Paste a plain-text decklist to run the first diagnosis. Everything stays in this browser — no account required."
+          description="Paste a plain-text decklist to run the first diagnosis."
           action={
             <Link href="/decks/new" className={buttonClassName()}>
               Import your first deck
@@ -100,104 +102,110 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Good to see you"
-        title="Deck clinic"
-        description="Which lists need attention, and which physical cards are fighting for the same slot."
+        eyebrow="Clinic open"
+        title="MTG Deck Doctor"
+        description="A quick pulse across your collection — open Decks for the full shelf with commander art."
         actions={
-          <Link href="/decks/new" className={buttonClassName()}>
-            Import deck
-          </Link>
+          <>
+            <Link href="/decks" className={buttonClassName("secondary")}>
+              Browse decks
+            </Link>
+            <Link href="/decks/new" className={buttonClassName()}>
+              Import deck
+            </Link>
+          </>
         }
       />
 
-      <section className="grid gap-3 sm:grid-cols-3">
-        <Panel>
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted">Decks</p>
-          <p className="mt-1 font-[family-name:var(--font-display)] text-3xl font-semibold tabular-nums">
-            {decks.length}
-          </p>
-        </Panel>
-        <Panel>
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted">Shared ≥ €5</p>
-          <p className="mt-1 font-[family-name:var(--font-display)] text-3xl font-semibold tabular-nums">
-            {shared.valuableCount}
-          </p>
-        </Panel>
-        <Panel>
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted">Conflicts</p>
-          <p className="mt-1 font-[family-name:var(--font-display)] text-3xl font-semibold tabular-nums">
-            {shared.conflicts.length}
-          </p>
-        </Panel>
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatPanel label="Decks" value={decks.length} hint={`${clinic.analyzedCount} diagnosed`} />
+        <StatPanel
+          label="Avg health"
+          value={clinic.overallAvg ?? "—"}
+          hint={clinic.overallAvg !== null ? "/ 100" : "Still analyzing"}
+        />
+        <StatPanel
+          label="Need attention"
+          value={clinic.needingAttention.length}
+          hint={clinic.problemCount > 0 ? `${clinic.problemCount} open problems` : "Looking solid"}
+        />
+        <StatPanel
+          label="Shared ≥ €5"
+          value={shared.valuableCount}
+          hint={
+            shared.conflicts.length > 0
+              ? `${shared.conflicts.length} conflict${shared.conflicts.length === 1 ? "" : "s"}`
+              : "No conflicts"
+          }
+        />
       </section>
 
-      <Panel>
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold">Your decks</h2>
-          <Link href="/decks" className="text-sm font-medium text-accent-strong hover:underline">
-            View all
-          </Link>
-        </div>
-        <ul className="space-y-3">
-          {decks.map(({ deck }) => {
-            const analysis = scores[deck.id];
-            const status = analysis ? healthStatus(analysis.health.overall) : null;
-            const commanders = deck.commanderOracleIds
-              .map((id) => cards.get(id))
-              .filter((c): c is NonNullable<typeof c> => Boolean(c));
-            return (
+      {clinic.missingCommander > 0 || clinic.strongest ? (
+        <Panel>
+          <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold">Snapshot</h2>
+          <ul className="mt-3 space-y-2 text-sm text-ink-muted">
+            {clinic.strongest ? (
+              <li>
+                Strongest list:{" "}
+                <Link
+                  href={`/decks/${clinic.strongest.deck.id}`}
+                  className="font-medium text-accent-strong hover:underline"
+                >
+                  {clinic.strongest.deck.name}
+                </Link>{" "}
+                ({clinic.strongest.analysis.health.overall}/100)
+              </li>
+            ) : null}
+            {clinic.missingCommander > 0 ? (
+              <li>
+                {clinic.missingCommander} deck
+                {clinic.missingCommander === 1 ? "" : "s"} still missing a commander — set one for
+                better diagnosis.
+              </li>
+            ) : null}
+            <li>
+              {shared.sharedCount} overlapping staple
+              {shared.sharedCount === 1 ? "" : "s"} across your lists.
+            </li>
+          </ul>
+        </Panel>
+      ) : null}
+
+      {clinic.needingAttention.length > 0 ? (
+        <Panel>
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold">
+              Needs a checkup
+            </h2>
+            <Link href="/decks" className="text-sm font-medium text-accent-strong hover:underline">
+              All decks
+            </Link>
+          </div>
+          <ul className="space-y-2">
+            {clinic.needingAttention.map(({ deck, analysis, status }) => (
               <li key={deck.id}>
                 <Link
                   href={`/decks/${deck.id}`}
-                  className="block rounded-2xl border border-[var(--border)] p-3 transition hover:border-accent/40 hover:bg-accent/[0.03] sm:p-4"
+                  className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] px-3 py-2.5 transition hover:border-accent/40"
                 >
-                  <div className="flex gap-3">
-                    <div className="flex shrink-0 gap-2">
-                      {commanders.length > 0 ? (
-                        commanders.slice(0, 2).map((commander) => (
-                          <CardArt
-                            key={commander.oracleId}
-                            name={commander.name}
-                            imageUri={commander.imageUri}
-                            size="md"
-                          />
-                        ))
-                      ) : (
-                        <CardArt name="Commander" imageUri={null} size="md" />
+                  <span className="min-w-0 truncate font-medium text-ink">{deck.name}</span>
+                  <span className="flex shrink-0 items-center gap-2">
+                    <StatChip label="Problems" value={analysis.problems.length} />
+                    <span
+                      className={cn(
+                        "rounded-full px-2 py-0.5 text-xs font-medium",
+                        HEALTH_STATUS_SOFT_BG[status],
                       )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <h3 className="truncate font-semibold text-ink">{deck.name}</h3>
-                      <p className="mt-0.5 truncate text-sm text-muted">
-                        {commanders.length > 0
-                          ? commanders.map((c) => c.name).join(" / ")
-                          : "Commander not set"}
-                      </p>
-                      {status ? (
-                        <span
-                          className={cn(
-                            "mt-2 inline-flex rounded-full px-2 py-0.5 text-xs font-medium",
-                            HEALTH_STATUS_SOFT_BG[status],
-                          )}
-                        >
-                          {analysis.health.overall}/100
-                        </span>
-                      ) : (
-                        <span className="mt-2 inline-block text-xs text-muted">Analyzing…</span>
-                      )}
-                      {analysis ? (
-                        <div className="mt-3">
-                          <HealthMeter health={analysis.health} compact />
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
+                    >
+                      {analysis.health.overall}/100
+                    </span>
+                  </span>
                 </Link>
               </li>
-            );
-          })}
-        </ul>
-      </Panel>
+            ))}
+          </ul>
+        </Panel>
+      ) : null}
 
       <Panel>
         <div className="mb-4 flex items-center justify-between gap-3">
@@ -208,11 +216,32 @@ export default function DashboardPage() {
             Shared cards
           </Link>
         </div>
-        <SharedCardList
-          items={shared.conflicts.length > 0 ? shared.conflicts.slice(0, 5) : shared.shared}
-          cards={cards}
-        />
+        {shared.preview.length > 0 ? (
+          <SharedCardList items={shared.preview} cards={cards} />
+        ) : (
+          <p className="text-sm text-muted">No expensive overlaps yet — import another deck.</p>
+        )}
       </Panel>
     </div>
+  );
+}
+
+function StatPanel({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: number | string;
+  hint: string;
+}) {
+  return (
+    <Panel>
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted">{label}</p>
+      <p className="mt-1 font-[family-name:var(--font-display)] text-3xl font-semibold tabular-nums text-ink">
+        {value}
+      </p>
+      <p className="mt-1 text-xs text-muted">{hint}</p>
+    </Panel>
   );
 }

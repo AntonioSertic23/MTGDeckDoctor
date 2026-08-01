@@ -1,6 +1,11 @@
-import type { Problem, Severity } from "@/domain/types";
+import type { AdditionCandidate, CardPrices, Problem, Severity } from "@/domain/types";
 import { CardArt } from "@/components/card-art";
 import { cn } from "@/lib/utils";
+
+export type CardVisual = {
+  imageUri: string | null;
+  prices?: CardPrices | null;
+};
 
 const SEVERITY_STYLES: Record<Severity, string> = {
   critical: "border-rose-500/30 bg-rose-500/8 text-rose-700 dark:text-rose-300",
@@ -19,8 +24,8 @@ export function ProblemList({
   artByName,
 }: {
   problems: Problem[];
-  /** Lowercased card name → image URI, for cards already in the deck. */
-  artByName?: Map<string, string | null>;
+  /** Lowercased card name → art + prices for cards already in the deck. */
+  artByName?: Map<string, CardVisual>;
 }) {
   if (problems.length === 0) {
     return (
@@ -64,7 +69,8 @@ export function ProblemList({
                     >
                       <CardArt
                         name={name}
-                        imageUri={artByName?.get(name.toLowerCase()) ?? null}
+                        imageUri={artByName?.get(name.toLowerCase())?.imageUri ?? null}
+                        prices={artByName?.get(name.toLowerCase())?.prices}
                         size="md"
                       />
                       <span className="line-clamp-2 text-[11px] leading-tight text-ink">{name}</span>
@@ -72,10 +78,39 @@ export function ProblemList({
                   ))}
                 </ul>
               ) : null}
+              {problem.suggestions && problem.suggestions.length > 0 ? (
+                <SuggestionStrip suggestions={problem.suggestions} />
+              ) : null}
             </div>
           </div>
         </li>
       ))}
     </ul>
+  );
+}
+
+function SuggestionStrip({ suggestions }: { suggestions: AdditionCandidate[] }) {
+  return (
+    <div className="rounded-xl border border-black/5 bg-black/[0.03] px-3 py-2.5 dark:border-white/10 dark:bg-white/[0.04]">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Try adding</p>
+      <ul className="mt-2 flex gap-2.5 overflow-x-auto pb-1">
+        {suggestions.map((card) => (
+          <li key={card.name} className="flex w-[6.5rem] shrink-0 flex-col items-center gap-1.5 text-center">
+            <CardArt
+              name={card.name}
+              imageUri={card.imageUri}
+              prices={card.prices}
+              size="md"
+            />
+            <span className="line-clamp-2 text-[11px] font-medium leading-tight text-ink">
+              {card.name}
+            </span>
+            <span className="line-clamp-2 text-[10px] leading-snug text-muted">
+              {card.reasons[card.reasons.length - 1] ?? card.reasons[0]}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

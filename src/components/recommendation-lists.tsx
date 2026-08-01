@@ -10,7 +10,7 @@ export function CutList({ cuts }: { cuts: CutCandidate[] }) {
     <ul className="space-y-3">
       {cuts.map((cut, index) => (
         <li key={cut.oracleId} className="flex gap-3 rounded-2xl border border-[var(--border)] p-3">
-          <CardArt name={cut.name} imageUri={cut.imageUri} size="md" />
+          <CardArt name={cut.name} imageUri={cut.imageUri} prices={cut.prices} size="md" />
           <div className="min-w-0 flex-1">
             <div className="flex items-baseline justify-between gap-3">
               <h3 className="font-semibold text-ink">
@@ -46,7 +46,7 @@ export function AdditionList({ additions }: { additions: AdditionCandidate[] }) 
     <ul className="space-y-3">
       {additions.map((item) => (
         <li key={item.name} className="flex gap-3 rounded-2xl border border-[var(--border)] p-3">
-          <CardArt name={item.name} imageUri={item.imageUri} size="md" />
+          <CardArt name={item.name} imageUri={item.imageUri} prices={item.prices} size="md" />
           <div className="min-w-0 flex-1">
             <div className="flex items-baseline justify-between gap-3">
               <h3 className="font-semibold text-ink">{item.name}</h3>

@@ -145,7 +145,12 @@ function CommanderSlot({
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3 sm:flex-row sm:items-start">
       <div className="mx-auto shrink-0 sm:mx-0">
-        <CardArt name={card?.name ?? label} imageUri={card?.imageUri} size="lg" />
+        <CardArt
+          name={card?.name ?? label}
+          imageUri={card?.imageUri}
+          prices={card?.prices}
+          size="lg"
+        />
       </div>
 
       <div className="min-w-0 flex-1 space-y-3 text-center sm:text-left">

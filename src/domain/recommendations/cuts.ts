@@ -52,6 +52,7 @@ export function suggestCuts(
         .sort((a, b) => b.points - a.points)
         .map((c) => c.reason),
       imageUri: entry.card.imageUri,
+      prices: entry.card.prices,
     };
   });
 

@@ -41,6 +41,40 @@ export function suggestAdditions(
   return dropRedundant(candidates).slice(0, limit);
 }
 
+/**
+ * Role-focused suggestions for a specific problem / health gap (e.g. only
+ * spot removal). Ignores the global per-role cap used on the Adds tab.
+ */
+export function suggestAdditionsForRoles(
+  deck: ResolvedDeck,
+  stats: DeckStatistics,
+  synergy: SynergySummary,
+  roles: CardRole[],
+  limit = 4,
+  thresholds: HealthThresholds = DEFAULT_THRESHOLDS,
+): AdditionCandidate[] {
+  if (roles.length === 0 || limit <= 0) return [];
+
+  const identity = new Set(stats.colorIdentity);
+  const owned = new Set(deck.entries.map((e) => normalizeName(e.card.name)));
+  const gaps = findRoleGaps(stats, thresholds);
+  const roleSet = new Set(roles);
+  const deckThemes = new Map(synergy.themes.map((t) => [t.id, t.count]));
+
+  // Ensure requested roles still score even when the gap is small but a problem fired.
+  for (const role of roles) {
+    if (!gaps.has(role)) gaps.set(role, 1);
+  }
+
+  return STAPLES.filter((staple) => staple.roles.some((role) => roleSet.has(role)))
+    .filter((staple) => isLegalInIdentity(staple, identity))
+    .filter((staple) => !owned.has(normalizeName(staple.name)))
+    .map((staple) => score(staple, gaps, deckThemes))
+    .filter((candidate) => candidate.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
 interface RoleGap {
   role: CardRole;
   missing: number;

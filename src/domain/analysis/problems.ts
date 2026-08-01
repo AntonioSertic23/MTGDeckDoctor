@@ -82,7 +82,7 @@ const RULES: ProblemRule[] = [
         type: "LOW_BOARD_WIPES",
         severity: stats.boardWipeCount === 0 ? "critical" : "warning",
         title: `Only ${stats.boardWipeCount} board wipes`,
-        description: `With ${stats.boardWipeCount} sweepers the deck has little recovery once an opponent establishes a wide board. Consider testing one or two more.`,
+        description: `Only ${stats.boardWipeCount} board wipe${stats.boardWipeCount === 1 ? "" : "s"} (recommended ${thresholds.recommendedBoardWipes}). The deck has little recovery once an opponent establishes a wide board.`,
         evidence: {
           boardWipeCount: stats.boardWipeCount,
           recommendedMinimum: thresholds.recommendedBoardWipes,
@@ -98,7 +98,7 @@ const RULES: ProblemRule[] = [
         type: "LOW_REMOVAL",
         severity: "warning",
         title: "Limited targeted removal",
-        description: `The deck has ${stats.spotRemovalCount} spot removal spells. Commander games usually present more must-answer permanents than that.`,
+        description: `The deck has ${stats.spotRemovalCount} spot removal spells (recommended ${thresholds.recommendedSpotRemoval}). Commander games usually present more must-answer permanents than that.`,
         evidence: {
           spotRemovalCount: stats.spotRemovalCount,
           recommendedMinimum: thresholds.recommendedSpotRemoval,
@@ -114,7 +114,7 @@ const RULES: ProblemRule[] = [
         type: "LOW_CARD_ADVANTAGE",
         severity: stats.drawCount < thresholds.recommendedDraw * 0.4 ? "critical" : "warning",
         title: "Deck may run out of cards",
-        description: `Only ${stats.drawCount} cards refill your hand. Without more card advantage the deck is likely to run out of resources in longer games.`,
+        description: `Only ${stats.drawCount} card-advantage pieces (recommended ${thresholds.recommendedDraw}). Without more draw the deck is likely to run out of resources in longer games.`,
         evidence: { drawCount: stats.drawCount, recommendedMinimum: thresholds.recommendedDraw },
         affectedCards: [],
       };

@@ -56,6 +56,16 @@ export function formatEur(value: number): string {
   }).format(value);
 }
 
+/** Cardmarket EUR via Scryfall; null when unavailable. */
+export function formatCardPrices(prices: {
+  eur?: string | null;
+  usd?: string | null;
+} | null | undefined): string | null {
+  if (!prices?.eur) return null;
+  const eur = Number.parseFloat(prices.eur);
+  return Number.isFinite(eur) ? formatEur(eur) : null;
+}
+
 export function cardEurPrice(card: { prices: { eur: string | null } } | undefined): number | null {
   if (!card?.prices.eur) return null;
   const value = Number.parseFloat(card.prices.eur);
