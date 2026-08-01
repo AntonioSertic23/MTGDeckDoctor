@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Activity, Layers, LayoutDashboard, Plus, Share2 } from "lucide-react";
+import { getStorageBackend } from "@/lib/storage";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -14,6 +15,7 @@ const NAV = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const backend = getStorageBackend();
 
   return (
     <div className="flex min-h-full flex-col">
@@ -33,28 +35,40 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </span>
           </Link>
 
-          <nav className="hidden items-center gap-1 md:flex" aria-label="Primary">
-            {NAV.map((item) => {
-              const active =
-                item.href === "/"
-                  ? pathname === "/"
-                  : pathname === item.href || pathname.startsWith(`${item.href}/`);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    "rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                    active
-                      ? "bg-accent/10 text-accent-strong"
-                      : "text-muted hover:bg-black/5 hover:text-ink dark:hover:bg-white/5",
-                  )}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
+          <div className="flex items-center gap-2">
+            <span
+              className="hidden rounded-md border border-[var(--border)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted sm:inline"
+              title={
+                backend === "supabase"
+                  ? "Data syncs via Supabase (anonymous session)"
+                  : "Data stays in this browser (IndexedDB)"
+              }
+            >
+              {backend === "supabase" ? "Cloud" : "Local"}
+            </span>
+            <nav className="hidden items-center gap-1 md:flex" aria-label="Primary">
+              {NAV.map((item) => {
+                const active =
+                  item.href === "/"
+                    ? pathname === "/"
+                    : pathname === item.href || pathname.startsWith(`${item.href}/`);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={cn(
+                      "rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                      active
+                        ? "bg-accent/10 text-accent-strong"
+                        : "text-muted hover:bg-black/5 hover:text-ink dark:hover:bg-white/5",
+                    )}
+                  >
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </nav>
+          </div>
         </div>
       </header>
 

@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { Card, Deck, DeckWithCards, InventoryItem } from "@/domain/types";
-import { idbRepository } from "@/lib/storage/idb-repository";
+import { resolveCardsByOracleIds } from "@/lib/cards/client";
+import { getRepository } from "@/lib/storage";
 
 export function useDecks() {
   const [decks, setDecks] = useState<Deck[]>([]);
@@ -12,7 +13,7 @@ export function useDecks() {
   const refresh = useCallback(async () => {
     try {
       setError(null);
-      const list = await idbRepository.listDecks();
+      const list = await getRepository().listDecks();
       setDecks(list);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load decks.");
@@ -38,13 +39,38 @@ export function useDecksWithCards() {
   const refresh = useCallback(async () => {
     try {
       setError(null);
+      const repo = getRepository();
       const [list, allCards, inv] = await Promise.all([
-        idbRepository.listDecksWithCards(),
-        idbRepository.getAllCards(),
-        idbRepository.listInventory(),
+        repo.listDecksWithCards(),
+        repo.getAllCards(),
+        repo.listInventory(),
       ]);
+
+      const cardMap = new Map(allCards.map((c) => [c.oracleId, c]));
+      const neededIds = new Set<string>();
+      for (const { cards: deckCards } of list) {
+        for (const deckCard of deckCards) neededIds.add(deckCard.oracleId);
+      }
+
+      const missingOrNoArt = [...neededIds].filter((id) => {
+        const card = cardMap.get(id);
+        return !card || !card.imageUri;
+      });
+
+      if (missingOrNoArt.length > 0) {
+        try {
+          const hydrated = await resolveCardsByOracleIds(missingOrNoArt);
+          if (hydrated.length > 0) {
+            await repo.saveCards(hydrated);
+            for (const card of hydrated) cardMap.set(card.oracleId, card);
+          }
+        } catch {
+          // Offline / Scryfall down — keep whatever local cache we have.
+        }
+      }
+
       setDecks(list);
-      setCards(new Map(allCards.map((c) => [c.oracleId, c])));
+      setCards(cardMap);
       setInventory(inv);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load data.");
@@ -68,7 +94,7 @@ export function useDeck(id: string) {
   const refresh = useCallback(async () => {
     try {
       setError(null);
-      const result = await idbRepository.getDeck(id);
+      const result = await getRepository().getDeck(id);
       setDeck(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load deck.");

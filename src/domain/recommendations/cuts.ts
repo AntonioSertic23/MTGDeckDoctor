@@ -51,6 +51,7 @@ export function suggestCuts(
         .filter((c) => c.points > 0)
         .sort((a, b) => b.points - a.points)
         .map((c) => c.reason),
+      imageUri: entry.card.imageUri,
     };
   });
 

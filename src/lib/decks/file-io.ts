@@ -1,5 +1,5 @@
 import type { Card, Deck, DeckCard, DeckWithCards, InventoryItem } from "@/domain/types";
-import { idbRepository } from "@/lib/storage/idb-repository";
+import { getRepository } from "@/lib/storage";
 
 export const DECK_FILE_VERSION = 1 as const;
 
@@ -14,9 +14,9 @@ export interface DeckExportFile {
 
 /** Build a downloadable JSON snapshot of one or all decks. */
 export async function buildExportPayload(deckIds?: string[]): Promise<DeckExportFile> {
-  const all = await idbRepository.listDecksWithCards();
+  const all = await getRepository().listDecksWithCards();
   const decks = deckIds ? all.filter((d) => deckIds.includes(d.deck.id)) : all;
-  const inventory = await idbRepository.listInventory();
+  const inventory = await getRepository().listInventory();
 
   const oracleIds = new Set<string>();
   for (const { cards } of decks) {
@@ -24,7 +24,7 @@ export async function buildExportPayload(deckIds?: string[]): Promise<DeckExport
   }
   for (const item of inventory) oracleIds.add(item.oracleId);
 
-  const cards = await idbRepository.getCards([...oracleIds]);
+  const cards = await getRepository().getCards([...oracleIds]);
 
   return {
     version: DECK_FILE_VERSION,
@@ -56,7 +56,7 @@ export async function exportDecksToFile(deckIds?: string[]): Promise<void> {
   downloadJson(name, payload);
 }
 
-/** Import decks/cards from a previously exported JSON file into IndexedDB. */
+/** Import decks/cards from a previously exported JSON file into active storage. */
 export async function importDecksFromFile(file: File): Promise<{ imported: number }> {
   const text = await file.text();
   const raw = JSON.parse(text) as DeckExportFile;
@@ -68,18 +68,18 @@ export async function importDecksFromFile(file: File): Promise<{ imported: numbe
     throw new Error("Export file is missing decks or cards.");
   }
 
-  await idbRepository.saveCards(raw.cards);
+  await getRepository().saveCards(raw.cards);
 
   let imported = 0;
   for (const entry of raw.decks) {
     const deck = sanitizeDeck(entry.deck);
     const cards = sanitizeDeckCards(entry.cards);
-    const existing = await idbRepository.getDeck(deck.id);
+    const existing = await getRepository().getDeck(deck.id);
     if (existing) {
-      await idbRepository.updateDeck(deck);
-      await idbRepository.setDeckCards(deck.id, cards);
+      await getRepository().updateDeck(deck);
+      await getRepository().setDeckCards(deck.id, cards);
     } else {
-      await idbRepository.createDeck(deck, cards);
+      await getRepository().createDeck(deck, cards);
     }
     imported += 1;
   }
@@ -87,7 +87,7 @@ export async function importDecksFromFile(file: File): Promise<{ imported: numbe
   if (Array.isArray(raw.inventory)) {
     for (const item of raw.inventory) {
       if (item?.oracleId && typeof item.quantity === "number") {
-        await idbRepository.setInventoryQuantity(item.oracleId, item.quantity);
+        await getRepository().setInventoryQuantity(item.oracleId, item.quantity);
       }
     }
   }

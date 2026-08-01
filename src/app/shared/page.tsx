@@ -8,7 +8,7 @@ import {
   findSharedCards,
 } from "@/domain/sharing/shared-cards";
 import { useDecksWithCards } from "@/lib/hooks/use-repository";
-import { idbRepository } from "@/lib/storage/idb-repository";
+import { getRepository } from "@/lib/storage";
 import { SharedCardList } from "@/components/shared-card-list";
 import { Button, EmptyState, PageHeader, Panel } from "@/components/ui";
 import { cardEurPrice, cn } from "@/lib/utils";
@@ -47,7 +47,7 @@ export default function SharedCardsPage() {
   const matrix = useMemo(() => buildMatrix(decks, filtered, 2), [decks, filtered]);
 
   async function setOwned(oracleId: string, quantity: number) {
-    await idbRepository.setInventoryQuantity(oracleId, quantity);
+    await getRepository().setInventoryQuantity(oracleId, quantity);
     await refresh();
   }
 

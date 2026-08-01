@@ -4,15 +4,16 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import type { LocalAnalysis } from "@/lib/decks/analyze-local";
-import { analyzeDeckLocal } from "@/lib/decks/analyze-local";
+import { getCachedOrAnalyzeDeck } from "@/lib/decks/analyze-local";
 import { useDeck, useDecksWithCards } from "@/lib/hooks/use-repository";
-import { idbRepository } from "@/lib/storage/idb-repository";
+import { getRepository } from "@/lib/storage";
 import { buildSharedCardIndex, findSharedCards } from "@/domain/sharing/shared-cards";
 import { HealthMeter } from "@/components/health-meter";
 import { ProblemList } from "@/components/problem-list";
 import { AdditionList, CutList } from "@/components/recommendation-lists";
 import { SharedCardList } from "@/components/shared-card-list";
 import { Button, buttonClassName, PageHeader, Panel, StatChip } from "@/components/ui";
+import { CardArt } from "@/components/card-art";
 import { CommanderPanel } from "@/components/commander-panel";
 import { exportDecksToFile } from "@/lib/decks/file-io";
 import { cn } from "@/lib/utils";
@@ -48,7 +49,7 @@ export default function DeckDetailPage() {
       if (!deck) return;
       try {
         setAnalyzeError(null);
-        const result = await analyzeDeckLocal(deck);
+        const result = await getCachedOrAnalyzeDeck(deck);
         if (!cancelled) setAnalysis(result);
       } catch (err) {
         if (!cancelled) {
@@ -68,6 +69,22 @@ export default function DeckDetailPage() {
     const usage = buildSharedCardIndex(decks, cards, inventory);
     return findSharedCards(usage).filter((u) => u.deckIds.includes(deck.deck.id));
   }, [deck, decks, cards, inventory]);
+
+  const artByName = useMemo(() => {
+    const map = new Map<string, string | null>();
+    if (!analysis) return map;
+    for (const entry of analysis.resolved.entries) {
+      map.set(entry.card.name.toLowerCase(), entry.card.imageUri);
+      map.set(
+        (entry.card.name.split("//")[0] ?? entry.card.name).trim().toLowerCase(),
+        entry.card.imageUri,
+      );
+    }
+    for (const addition of analysis.additions) {
+      map.set(addition.name.toLowerCase(), addition.imageUri ?? null);
+    }
+    return map;
+  }, [analysis]);
 
   if (loading) return <p className="text-sm text-muted">Loading deck…</p>;
   if (error) return <p className="text-sm text-rose-600">{error}</p>;
@@ -90,7 +107,7 @@ export default function DeckDetailPage() {
     if (!deck) return;
     if (!window.confirm(`Delete “${deck.deck.name}”? This only removes it from this browser.`)) return;
     startDelete(async () => {
-      await idbRepository.deleteDeck(deck.deck.id);
+      await getRepository().deleteDeck(deck.deck.id);
       router.push("/decks");
     });
   }
@@ -106,7 +123,7 @@ export default function DeckDetailPage() {
     if (!deck) return;
     const next = window.prompt("Deck name", deck.deck.name);
     if (!next || next.trim() === deck.deck.name) return;
-    await idbRepository.updateDeck({ ...deck.deck, name: next.trim() });
+    await getRepository().updateDeck({ ...deck.deck, name: next.trim() });
     await refresh();
   }
 
@@ -117,7 +134,7 @@ export default function DeckDetailPage() {
       const primaryName = analysis?.resolved.entries.find(
         (e) => e.card.oracleId === commanderOracleIds[0],
       )?.card.name;
-      await idbRepository.updateDeck({
+      await getRepository().updateDeck({
         ...deck.deck,
         commanderOracleIds,
         name:
@@ -150,7 +167,23 @@ export default function DeckDetailPage() {
             <Button variant="secondary" onClick={exportDeck} disabled={deleting || busy}>
               Export JSON
             </Button>
-            <Button variant="secondary" onClick={() => void refresh()} disabled={deleting || busy}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                if (!deck) return;
+                startBusy(async () => {
+                  try {
+                    setAnalyzeError(null);
+                    const result = await getCachedOrAnalyzeDeck(deck, { force: true });
+                    setAnalysis(result);
+                    await refresh();
+                  } catch (err) {
+                    setAnalyzeError(err instanceof Error ? err.message : "Analysis failed.");
+                  }
+                });
+              }}
+              disabled={deleting || busy}
+            >
               Re-analyze
             </Button>
             <Button variant="danger" onClick={deleteDeck} disabled={deleting || busy}>
@@ -224,7 +257,10 @@ export default function DeckDetailPage() {
                 <h2 className="mb-3 font-[family-name:var(--font-display)] text-lg font-semibold">
                   Top problems
                 </h2>
-                <ProblemList problems={analysis.analysis.problems.slice(0, 3)} />
+                <ProblemList
+                  problems={analysis.analysis.problems.slice(0, 3)}
+                  artByName={artByName}
+                />
               </Panel>
             </div>
           ) : null}
@@ -238,7 +274,7 @@ export default function DeckDetailPage() {
           {tab === "problems" ? (
             <Panel>
               <h2 className="mb-4 font-[family-name:var(--font-display)] text-xl font-semibold">Problems</h2>
-              <ProblemList problems={analysis.analysis.problems} />
+              <ProblemList problems={analysis.analysis.problems} artByName={artByName} />
             </Panel>
           ) : null}
 
@@ -311,22 +347,9 @@ export default function DeckDetailPage() {
                       key={entry.card.oracleId}
                       className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] p-3 sm:flex-row"
                     >
-                      {entry.card.imageUri ? (
-                        // Scryfall CDN; plain img keeps Netlify/Next image config simple.
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={entry.card.imageUri}
-                          alt={entry.card.name}
-                          width={146}
-                          height={204}
-                          loading="lazy"
-                          className="mx-auto h-auto w-[146px] shrink-0 rounded-lg object-cover shadow-md sm:mx-0"
-                        />
-                      ) : (
-                        <div className="mx-auto flex h-[204px] w-[146px] shrink-0 items-center justify-center rounded-lg bg-black/5 text-xs text-muted sm:mx-0 dark:bg-white/10">
-                          No art
-                        </div>
-                      )}
+                      <div className="mx-auto shrink-0 sm:mx-0">
+                        <CardArt name={entry.card.name} imageUri={entry.card.imageUri} size="lg" />
+                      </div>
                       <div className="min-w-0 flex-1 py-0.5 text-center sm:text-left">
                         <p className="font-medium leading-snug text-ink">
                           {entry.quantity > 1 ? `${entry.quantity}× ` : null}
@@ -359,7 +382,7 @@ export default function DeckDetailPage() {
               <p className="mb-4 text-sm text-muted">
                 Cards in this list that also appear elsewhere in your browser library.
               </p>
-              <SharedCardList items={sharedForDeck} />
+              <SharedCardList items={sharedForDeck} cards={cards} />
             </Panel>
           ) : null}
         </>

@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { analyzeDeckLocal } from "@/lib/decks/analyze-local";
+import { deckContentKey, getCachedOrAnalyzeDeck } from "@/lib/decks/analyze-local";
 import { useDecksWithCards } from "@/lib/hooks/use-repository";
 import { buildSharedCardIndex, findConflicts, findSharedCards } from "@/domain/sharing/shared-cards";
 import { HealthMeter } from "@/components/health-meter";
 import { SharedCardList } from "@/components/shared-card-list";
+import { CardArt } from "@/components/card-art";
 import { buttonClassName, EmptyState, PageHeader, Panel } from "@/components/ui";
 import { HEALTH_STATUS_SOFT_BG, cardEurPrice, cn, healthStatus } from "@/lib/utils";
 import type { DeckAnalysis } from "@/domain/types";
@@ -20,15 +21,25 @@ export default function DashboardPage() {
 
     async function run() {
       const next: Record<string, DeckAnalysis> = {};
+      // Paint cached scores immediately so Home does not flash "Analyzing…".
       for (const deck of decks) {
+        const snap = deck.deck.analysisSnapshot;
+        if (snap && snap.contentKey === deckContentKey(deck)) {
+          next[deck.deck.id] = snap.analysis;
+        }
+      }
+      if (!cancelled) setScores({ ...next });
+
+      for (const deck of decks) {
+        if (next[deck.deck.id]) continue;
         try {
-          const { analysis } = await analyzeDeckLocal(deck);
+          const { analysis } = await getCachedOrAnalyzeDeck(deck);
           next[deck.deck.id] = analysis;
+          if (!cancelled) setScores({ ...next });
         } catch {
           // Incomplete card cache — skip until the user re-opens the deck.
         }
       }
-      if (!cancelled) setScores(next);
     }
 
     if (decks.length > 0) void run();
@@ -141,32 +152,18 @@ export default function DashboardPage() {
                   className="block rounded-2xl border border-[var(--border)] p-3 transition hover:border-accent/40 hover:bg-accent/[0.03] sm:p-4"
                 >
                   <div className="flex gap-3">
-                    <div className="flex shrink-0 gap-1.5">
+                    <div className="flex shrink-0 gap-2">
                       {commanders.length > 0 ? (
-                        commanders.slice(0, 2).map((commander) =>
-                          commander.imageUri ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              key={commander.oracleId}
-                              src={commander.imageUri}
-                              alt={commander.name}
-                              width={56}
-                              height={78}
-                              className="h-[78px] w-[56px] rounded-md object-cover shadow-sm"
-                            />
-                          ) : (
-                            <div
-                              key={commander.oracleId}
-                              className="flex h-[78px] w-[56px] items-center justify-center rounded-md bg-black/5 text-[9px] text-muted dark:bg-white/10"
-                            >
-                              Cmd
-                            </div>
-                          ),
-                        )
+                        commanders.slice(0, 2).map((commander) => (
+                          <CardArt
+                            key={commander.oracleId}
+                            name={commander.name}
+                            imageUri={commander.imageUri}
+                            size="md"
+                          />
+                        ))
                       ) : (
-                        <div className="flex h-[78px] w-[56px] items-center justify-center rounded-md border border-dashed border-[var(--border)] text-[9px] text-muted">
-                          ?
-                        </div>
+                        <CardArt name="Commander" imageUri={null} size="md" />
                       )}
                     </div>
                     <div className="min-w-0 flex-1">

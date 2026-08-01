@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@netlify/plugin-nextjs": "^5.15.13",
+    "@supabase/supabase-js": "^2.111.0",
     "clsx": "^2.1.1",
     "idb": "^8.0.3",
     "lucide-react": "^1.28.0",

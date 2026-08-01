@@ -2,6 +2,7 @@ import type {
   Card,
   CardAllocation,
   Deck,
+  DeckAnalysisSnapshot,
   DeckCard,
   DeckWithCards,
   InventoryItem,
@@ -10,10 +11,9 @@ import type {
 /**
  * Persistence boundary.
  *
- * v1 stores everything in the browser (see `idb-repository.ts`), which keeps
- * each visitor's decks private without an auth system. Moving to Postgres
- * later means writing one more implementation of this interface — no call site
- * needs to change.
+ * Prefer Supabase when configured; otherwise IndexedDB. Analysis snapshots are
+ * stored with the deck so Home / detail pages do not re-run the full pipeline
+ * until the list content changes.
  */
 export interface DeckRepository {
   listDecks(): Promise<Deck[]>;
@@ -23,6 +23,8 @@ export interface DeckRepository {
   updateDeck(deck: Deck): Promise<void>;
   setDeckCards(deckId: string, cards: DeckCard[]): Promise<void>;
   deleteDeck(id: string): Promise<void>;
+  /** Persist diagnosis without bumping deck.updatedAt. */
+  saveAnalysisSnapshot(deckId: string, snapshot: DeckAnalysisSnapshot): Promise<void>;
 
   getCards(oracleIds: string[]): Promise<Card[]>;
   getAllCards(): Promise<Card[]>;

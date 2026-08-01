@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { Card, Color } from "@/domain/types";
+import { cleanCardName } from "@/lib/cards/clean-name";
 import type { CardLookup, CardProvider } from "@/lib/cards/provider";
 
 /**
@@ -81,13 +82,27 @@ export function normalizeName(name: string): string {
 }
 
 function nameVariants(name: string): string[] {
-  const normalized = normalizeName(name);
-  const front = normalized.split("//")[0].trim();
-  return front === normalized ? [normalized] : [normalized, front];
+  const variants = new Set<string>();
+  for (const candidate of [name, cleanCardName(name)]) {
+    if (!candidate.trim()) continue;
+    const normalized = normalizeName(candidate);
+    variants.add(normalized);
+    const front = normalized.split("//")[0]?.trim();
+    if (front) variants.add(front);
+  }
+  return [...variants];
 }
 
 function collectionName(name: string): string {
-  return name.split("//")[0].trim();
+  const cleaned = cleanCardName(name);
+  const primary = (cleaned || name).split("//")[0]?.trim() ?? "";
+  return primary;
+}
+
+function lookupNameCandidates(name: string): string[] {
+  const raw = name.split("//")[0]?.trim() ?? "";
+  const cleaned = collectionName(name);
+  return [...new Set([cleaned, raw].filter((n) => n.length > 0))];
 }
 
 function lookupKey(lookup: CardLookup): string {
@@ -196,7 +211,13 @@ export function mapScryfallCard(raw: ScryfallCard): Card {
 
   const typeLine = raw.type_line ?? faces.map((f) => f.type_line ?? "").join(" // ");
   const imageUri =
-    raw.image_uris?.normal ?? front?.image_uris?.normal ?? raw.image_uris?.large ?? null;
+    raw.image_uris?.normal ??
+    raw.image_uris?.large ??
+    front?.image_uris?.normal ??
+    front?.image_uris?.large ??
+    front?.image_uris?.small ??
+    raw.image_uris?.small ??
+    null;
 
   return {
     oracleId: raw.oracle_id ?? raw.id,
@@ -334,10 +355,14 @@ export const scryfallProvider: CardProvider = {
       }
 
       for (const lookup of unique.filter((l) => !assigned.has(lookupKey(l)))) {
-        const card = await fetchNamed(collectionName(lookup.name));
-        if (card) {
-          cacheCard(card);
-          cards.push(card);
+        let resolved: Card | null = null;
+        for (const candidate of lookupNameCandidates(lookup.name)) {
+          resolved = await fetchNamed(candidate);
+          if (resolved) break;
+        }
+        if (resolved) {
+          cacheCard(resolved);
+          cards.push(resolved);
           assigned.add(lookupKey(lookup));
         } else {
           stillMissing.push(lookup.name);

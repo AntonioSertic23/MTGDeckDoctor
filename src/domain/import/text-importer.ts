@@ -1,4 +1,5 @@
 import type { DeckImporter, ImportedDeck, ImportedDeckCard } from "@/domain/types";
+import { cleanCardName } from "@/lib/cards/clean-name";
 
 /**
  * Plain-text decklist importer (PRD §22).
@@ -13,11 +14,13 @@ const COMMANDER_SECTION = /^(\/\/\s*)?commanders?\b/i;
 const NON_DECK_SECTION = /^(\/\/\s*)?(maybeboard|sideboard|tokens?)\b/i;
 const CARD_LINE = /^(?:(\d+)\s*[xX]?\s+)?(.+)$/;
 const CATEGORY_TAG = /\s*\[[^\]]*\]\s*$/i;
-const FOIL_MARKER = /\*(?:F|f|foil)\*/gi;
+/** Archidekt finish markers: *F* foil, *E* etched, *S* signed. */
+const FOIL_MARKER = /\*(?:F|f|foil)\*/i;
+const FINISH_MARKER = /\*(?:F|E|S|f|e|s|foil|etched|signed)\*/gi;
 const COMMANDER_MARKER = /\*?\bcmdr\b\*?|\*commander\*/i;
-const COMMANDER_CATEGORY = /\[Commander[^\]]*\]/i;
+const COMMANDER_CATEGORY = /\[[^\]]*Commander[^\]]*\]/i;
 /** `(set) collector` near the end — keep these for printing-accurate Scryfall lookups. */
-const PRINTING = /\(([a-z0-9]+)\)\s+([A-Za-z0-9][A-Za-z0-9-]*)\s*$/i;
+const PRINTING = /\(([a-z0-9]+)\)\s+([A-Za-z0-9][A-Za-z0-9★†-]*)\s*$/i;
 const LOOSE_SET = /\(([a-z0-9]+)\)\s*$/i;
 
 export function parseDecklist(input: string): ImportedDeck {
@@ -93,7 +96,7 @@ function parseLine(line: string): ParsedLine | null {
   const quantity = match[1] ? Number.parseInt(match[1], 10) : 1;
   let rest = match[2]
     .replace(COMMANDER_MARKER, " ")
-    .replace(FOIL_MARKER, " ")
+    .replace(FINISH_MARKER, " ")
     .replace(CATEGORY_TAG, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -107,17 +110,33 @@ function parseLine(line: string): ParsedLine | null {
     collectorNumber = printing[2];
     rest = rest.slice(0, printing.index).trim();
   } else {
-    const looseSet = LOOSE_SET.exec(rest);
-    if (looseSet) {
-      setCode = looseSet[1].toLowerCase();
-      rest = rest.slice(0, looseSet.index).trim();
+    // Tolerant peel when collector has unexpected chars (★, trailing junk, etc.).
+    // Only strip when the match is at the end of the line so names like
+    // "B.F.M. (Big Furry Monster)" stay intact.
+    const loosePrinting = /\(([a-z0-9]+)\)\s+(\S+)/i.exec(rest);
+    if (loosePrinting && loosePrinting.index !== undefined) {
+      const after = rest.slice(loosePrinting.index + loosePrinting[0].length).trim();
+      if (after.length === 0 || /^(?:\*[A-Za-z]+\*\s*)+$/.test(after)) {
+        setCode = loosePrinting[1].toLowerCase();
+        const cleanedCollector = loosePrinting[2].replace(/[^A-Za-z0-9★†-]/g, "");
+        if (cleanedCollector) collectorNumber = cleanedCollector;
+        rest = rest.slice(0, loosePrinting.index).trim();
+      }
+    }
+    if (!setCode) {
+      const looseSet = LOOSE_SET.exec(rest);
+      if (looseSet) {
+        setCode = looseSet[1].toLowerCase();
+        rest = rest.slice(0, looseSet.index).trim();
+      }
     }
   }
 
   // Leftover brace/angle annotations, if any.
   rest = rest.replace(/\s*(\{[^}]*\}|<[^>]*>)\s*/g, " ").replace(/\s+/g, " ").trim();
-  // Split cards are written "Fire // Ice"; keep the full name for Scryfall.
-  const name = rest.replace(/\s*\/\/\s*/g, " // ");
+  // Always leave a clean name — even if set/collector extraction failed, Scryfall
+  // can still resolve by name alone.
+  const name = cleanCardName(rest.replace(/\s*\/\/\s*/g, " // "));
 
   if (name.length === 0) return null;
   if (!/[a-z]/i.test(name)) return null;

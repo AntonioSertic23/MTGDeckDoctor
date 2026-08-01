@@ -121,4 +121,51 @@ Maybeboard
     );
     expect(result.cards.reduce((sum, c) => sum + c.quantity, 0)).toBe(31);
   });
+
+  it("strips etched *E* markers so set/collector still parse", () => {
+    const result = parseDecklist(`1x Ramses, Assassin Lord (dmc) 61 *E* [Finisher]`);
+    expect(result.cards).toEqual([
+      {
+        name: "Ramses, Assassin Lord",
+        quantity: 1,
+        isCommander: false,
+        setCode: "dmc",
+        collectorNumber: "61",
+      },
+    ]);
+  });
+
+  it("keeps foil star collectors and Commander inside mixed category tags", () => {
+    const result = parseDecklist(`
+1x Natural Affinity (9ed) 256★ *F* [Land Destruction]
+1x Szarel, Genesis Shepherd (eoc) 4 [Creature,Commander{top}]
+`);
+    expect(result.cards).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "Natural Affinity",
+          setCode: "9ed",
+          collectorNumber: "256★",
+          foil: true,
+        }),
+        expect.objectContaining({
+          name: "Szarel, Genesis Shepherd",
+          isCommander: true,
+          setCode: "eoc",
+          collectorNumber: "4",
+        }),
+      ]),
+    );
+  });
+
+  it("falls back to a clean name when printing junk cannot be parsed", () => {
+    const result = parseDecklist(`1x Ramses, Assassin Lord (dmc) 61 *UNKNOWN* [Finisher]`);
+    expect(result.cards[0]).toEqual(
+      expect.objectContaining({
+        name: "Ramses, Assassin Lord",
+        setCode: "dmc",
+        collectorNumber: "61",
+      }),
+    );
+  });
 });

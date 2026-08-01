@@ -40,3 +40,17 @@ export async function searchCards(query: string): Promise<Card[]> {
   }
   return data.cards;
 }
+
+export async function resolveCardsByOracleIds(oracleIds: string[]): Promise<Card[]> {
+  if (oracleIds.length === 0) return [];
+  const response = await fetch("/api/cards/by-oracle", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ oracleIds }),
+  });
+  const data = (await response.json()) as { cards?: Card[]; error?: string };
+  if (!response.ok) {
+    throw new Error(data.error ?? "Could not load card art.");
+  }
+  return data.cards ?? [];
+}

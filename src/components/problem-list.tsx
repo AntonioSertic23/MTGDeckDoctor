@@ -1,4 +1,5 @@
 import type { Problem, Severity } from "@/domain/types";
+import { CardArt } from "@/components/card-art";
 import { cn } from "@/lib/utils";
 
 const SEVERITY_STYLES: Record<Severity, string> = {
@@ -13,7 +14,14 @@ const SEVERITY_DOT: Record<Severity, string> = {
   notice: "bg-sky-500",
 };
 
-export function ProblemList({ problems }: { problems: Problem[] }) {
+export function ProblemList({
+  problems,
+  artByName,
+}: {
+  problems: Problem[];
+  /** Lowercased card name → image URI, for cards already in the deck. */
+  artByName?: Map<string, string | null>;
+}) {
   if (problems.length === 0) {
     return (
       <p className="text-sm text-muted">
@@ -34,7 +42,7 @@ export function ProblemList({ problems }: { problems: Problem[] }) {
               className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", SEVERITY_DOT[problem.severity])}
               aria-hidden
             />
-            <div className="min-w-0 space-y-1">
+            <div className="min-w-0 flex-1 space-y-2">
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                 <h3 className="font-semibold text-ink">{problem.title}</h3>
                 <span className="text-[11px] font-semibold uppercase tracking-wide opacity-80">
@@ -46,6 +54,23 @@ export function ProblemList({ problems }: { problems: Problem[] }) {
                 <p className="text-sm text-ink/70">
                   <span className="font-medium">Treatment:</span> {problem.suggestedFix}
                 </p>
+              ) : null}
+              {problem.affectedCards.length > 0 ? (
+                <ul className="flex flex-wrap gap-2 pt-1">
+                  {problem.affectedCards.slice(0, 8).map((name) => (
+                    <li
+                      key={name}
+                      className="flex w-[7.25rem] flex-col items-center gap-1.5 text-center"
+                    >
+                      <CardArt
+                        name={name}
+                        imageUri={artByName?.get(name.toLowerCase()) ?? null}
+                        size="md"
+                      />
+                      <span className="line-clamp-2 text-[11px] leading-tight text-ink">{name}</span>
+                    </li>
+                  ))}
+                </ul>
               ) : null}
             </div>
           </div>

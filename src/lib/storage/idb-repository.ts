@@ -103,7 +103,7 @@ export const idbRepository: DeckRepository = {
 
   async setDeckCards(deckId, cards) {
     const db = await getDb();
-    const tx = db.transaction("deckCards", "readwrite");
+    const tx = db.transaction(["decks", "deckCards"], "readwrite");
     const store = tx.objectStore("deckCards");
 
     for (const existing of await store.index("byDeck").getAllKeys(deckId)) {
@@ -112,7 +112,23 @@ export const idbRepository: DeckRepository = {
     for (const card of cards) {
       await store.put({ ...card, id: deckCardKey(deckId, card.oracleId), deckId });
     }
+
+    const deck = await tx.objectStore("decks").get(deckId);
+    if (deck) {
+      await tx.objectStore("decks").put({
+        ...deck,
+        analysisSnapshot: null,
+        updatedAt: new Date().toISOString(),
+      });
+    }
     await tx.done;
+  },
+
+  async saveAnalysisSnapshot(deckId, snapshot) {
+    const db = await getDb();
+    const deck = await db.get("decks", deckId);
+    if (!deck) return;
+    await db.put("decks", { ...deck, analysisSnapshot: snapshot });
   },
 
   async deleteDeck(id) {

@@ -1,7 +1,9 @@
 import { importDeck } from "@/domain/import/text-importer";
 import type { Card, Deck, DeckCard } from "@/domain/types";
+import { cleanCardName } from "@/lib/cards/clean-name";
 import { resolveCardLookups } from "@/lib/cards/client";
-import { idbRepository } from "@/lib/storage/idb-repository";
+import { getCachedOrAnalyzeDeck } from "@/lib/decks/analyze-local";
+import { getRepository } from "@/lib/storage";
 import { createId } from "@/lib/utils";
 
 export interface ImportResult {
@@ -33,7 +35,7 @@ export async function resolveDecklistText(text: string): Promise<ResolveDecklist
       collectorNumber: c.collectorNumber,
     })),
   );
-  await idbRepository.saveCards(cards);
+  await getRepository().saveCards(cards);
 
   const byPrinting = new Map<string, Card>();
   const byName = new Map<string, Card>();
@@ -110,7 +112,13 @@ export async function importAndSaveDeck(
     updatedAt: now,
   };
 
-  await idbRepository.createDeck(deck, resolved.cards);
+  await getRepository().createDeck(deck, resolved.cards);
+  // Warm analysis cache so Home does not show "Analyzing…" on first visit.
+  try {
+    await getCachedOrAnalyzeDeck({ deck, cards: resolved.cards });
+  } catch {
+    // Analysis can retry when the user opens the deck / home.
+  }
 
   return {
     deck,
@@ -126,7 +134,7 @@ export async function replaceDeckList(
   text: string,
   options: { name?: string } = {},
 ): Promise<ImportResult> {
-  const existing = await idbRepository.getDeck(deckId);
+  const existing = await getRepository().getDeck(deckId);
   if (!existing) throw new Error("Deck not found.");
 
   const resolved = await resolveDecklistText(text);
@@ -141,8 +149,13 @@ export async function replaceDeckList(
     updatedAt: now,
   };
 
-  await idbRepository.updateDeck(deck);
-  await idbRepository.setDeckCards(deckId, resolved.cards);
+  await getRepository().updateDeck(deck);
+  await getRepository().setDeckCards(deckId, resolved.cards);
+  try {
+    await getCachedOrAnalyzeDeck({ deck: { ...deck, analysisSnapshot: null }, cards: resolved.cards });
+  } catch {
+    // Analysis can retry when the user opens the deck / home.
+  }
 
   return {
     deck,
@@ -184,7 +197,13 @@ function matchCard(
 }
 
 function nameVariants(name: string): string[] {
-  const normalized = normalize(name);
-  const front = normalized.split("//")[0].trim();
-  return front === normalized ? [normalized] : [normalized, front];
+  const variants = new Set<string>();
+  for (const candidate of [name, cleanCardName(name)]) {
+    if (!candidate.trim()) continue;
+    const normalized = normalize(candidate);
+    variants.add(normalized);
+    const front = normalized.split("//")[0]?.trim();
+    if (front) variants.add(front);
+  }
+  return [...variants];
 }

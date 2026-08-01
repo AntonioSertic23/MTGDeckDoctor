@@ -1,6 +1,7 @@
 "use client";
 
 import type { Card, ResolvedDeckEntry } from "@/domain/types";
+import { CardArt } from "@/components/card-art";
 import { Button, Panel } from "@/components/ui";
 
 const MAX_COMMANDERS = 2;
@@ -143,20 +144,9 @@ function CommanderSlot({
 }) {
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3 sm:flex-row sm:items-start">
-      {card?.imageUri ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={card.imageUri}
-          alt={card.name}
-          width={146}
-          height={204}
-          className="mx-auto h-auto w-[146px] shrink-0 rounded-lg object-cover shadow-md sm:mx-0"
-        />
-      ) : (
-        <div className="mx-auto flex h-[204px] w-[146px] shrink-0 items-center justify-center rounded-lg border border-dashed border-[var(--border)] text-xs text-muted sm:mx-0">
-          {label}
-        </div>
-      )}
+      <div className="mx-auto shrink-0 sm:mx-0">
+        <CardArt name={card?.name ?? label} imageUri={card?.imageUri} size="lg" />
+      </div>
 
       <div className="min-w-0 flex-1 space-y-3 text-center sm:text-left">
         <div>

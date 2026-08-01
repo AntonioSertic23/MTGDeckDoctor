@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Card, SharedCardUsage } from "@/domain/types";
+import { CardArt } from "@/components/card-art";
 import { formatEur } from "@/lib/utils";
 
 export function SharedCardList({
@@ -27,21 +28,7 @@ export function SharedCardList({
             key={item.oracleId}
             className="flex gap-3 rounded-2xl border border-[var(--border)] p-3"
           >
-            {card?.imageUri ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={card.imageUri}
-                alt={item.name}
-                width={63}
-                height={88}
-                loading="lazy"
-                className="h-[88px] w-[63px] shrink-0 rounded-md object-cover shadow-sm"
-              />
-            ) : (
-              <div className="flex h-[88px] w-[63px] shrink-0 items-center justify-center rounded-md bg-black/5 text-[10px] text-muted dark:bg-white/10">
-                No art
-              </div>
-            )}
+            <CardArt name={item.name} imageUri={card?.imageUri} size="md" />
             <div className="min-w-0 flex-1">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">

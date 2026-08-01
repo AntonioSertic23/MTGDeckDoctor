@@ -116,6 +116,20 @@ export interface Deck {
   description?: string;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Persisted diagnosis for this list. Recomputed when card/commander content
+   * changes; skipped on rename and on revisiting Home / deck pages.
+   */
+  analysisSnapshot?: DeckAnalysisSnapshot | null;
+}
+
+/** Fingerprinted analysis payload stored with the deck. */
+export interface DeckAnalysisSnapshot {
+  /** Hash of commanders + card quantities — invalidates cache when list changes. */
+  contentKey: string;
+  analysis: DeckAnalysis;
+  additions: AdditionCandidate[];
+  computedAt: string;
 }
 
 export interface DeckCard {
@@ -258,6 +272,7 @@ export interface CutCandidate {
   /** 0–100; higher means a stronger candidate to cut. */
   cutScore: number;
   reasons: string[];
+  imageUri?: string | null;
 }
 
 export interface AdditionCandidate {
@@ -267,6 +282,7 @@ export interface AdditionCandidate {
   approxManaValue: number;
   score: number;
   reasons: string[];
+  imageUri?: string | null;
 }
 
 export interface DeckProfile {
