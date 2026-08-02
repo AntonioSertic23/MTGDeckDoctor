@@ -24,7 +24,7 @@ export interface LocalAnalysis {
 /** Content fingerprint — changes when cards or commanders change, not on rename. */
 export function deckContentKey(deck: DeckWithCards): string {
   // Bump when the analysis payload shape changes (e.g. problem suggestions).
-  const version = 3;
+  const version = 6;
   const commanders = [...deck.deck.commanderOracleIds].sort().join("+");
   const cards = [...deck.cards]
     .map((c) => `${c.oracleId}:${c.quantity}`)

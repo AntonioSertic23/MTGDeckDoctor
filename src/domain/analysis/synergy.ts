@@ -24,10 +24,14 @@ export function calculateSynergy(deck: ResolvedDeck): SynergySummary {
   );
 
   // Only themes with real support count as the deck's identity; a single card
-  // mentioning "treasure" is noise, not a strategy.
-  const supportThreshold = Math.max(3, Math.round(nonland.length * 0.06));
+  // mentioning "treasure" is noise, not a strategy. Commander alone is not
+  // enough — need a few supporting pieces so cuts/adds are not hijacked.
+  const supportThreshold = Math.max(5, Math.round(nonland.length * 0.1));
   const themes = [...deckThemeCounts.entries()]
-    .filter(([id, count]) => count >= supportThreshold || commanderThemes.has(id))
+    .filter(
+      ([id, count]) =>
+        count >= supportThreshold || (commanderThemes.has(id) && count >= 3),
+    )
     .sort((a, b) => b[1] - a[1])
     .map(([id, count]) => ({ id, label: themeLabel(id), count }));
 

@@ -40,6 +40,46 @@ export function detectProblems(
 
 const RULES: ProblemRule[] = [
   {
+    detect: ({ stats, thresholds }): Problem | null => {
+      const required = thresholds.deckSize;
+      if (stats.totalCards === required) return null;
+
+      if (stats.totalCards > required) {
+        const excess = stats.totalCards - required;
+        const problem: Problem = {
+          type: "TOO_MANY_CARDS",
+          severity: "critical",
+          title: `Deck has ${stats.totalCards} cards (must be ${required})`,
+          description: `Commander decks must be exactly ${required} cards including the commander. This list is ${excess} over — cut that many to make the deck legal.`,
+          evidence: {
+            totalCards: stats.totalCards,
+            required,
+            excess,
+          },
+          affectedCards: [],
+          suggestedFix: `Cut ${excess} card${excess === 1 ? "" : "s"} so the deck reaches ${required}.`,
+        };
+        return problem;
+      }
+
+      const missing = required - stats.totalCards;
+      const problem: Problem = {
+        type: "TOO_FEW_CARDS",
+        severity: "critical",
+        title: `Deck has ${stats.totalCards} cards (must be ${required})`,
+        description: `Commander decks must be exactly ${required} cards including the commander. This list is ${missing} short — add that many to make the deck legal.`,
+        evidence: {
+          totalCards: stats.totalCards,
+          required,
+          missing,
+        },
+        affectedCards: [],
+        suggestedFix: `Add ${missing} card${missing === 1 ? "" : "s"} so the deck reaches ${required}.`,
+      };
+      return problem;
+    },
+  },
+  {
     detect: ({ stats, thresholds }) => {
       const target = recommendedRamp(stats.averageManaValue, thresholds);
       if (stats.rampCount >= target * 0.7) return null;
@@ -227,7 +267,7 @@ const RULES: ProblemRule[] = [
           .map((t) => t.label.toLowerCase())
           .join(" or ")}. They may still be fine staples, but they are the first place to look for flex slots.`,
         evidence: { count: offTheme.length },
-        affectedCards: offTheme.slice(0, 8).map((e) => e.card.name),
+        affectedCards: offTheme.map((e) => e.card.name),
       };
     },
   },

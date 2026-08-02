@@ -7,6 +7,10 @@ import { buildContext } from "@/domain/cards/classifier";
  * A theme is detected on a card either because the card *cares* about the
  * mechanic or because it *provides* it. Two cards sharing a theme is the
  * cheapest explainable synergy signal available without a curated database.
+ *
+ * Patterns are intentionally narrow: type-line membership alone (every
+ * artifact, every ETB trigger) creates false "core themes" that poison
+ * cuts and adds.
  */
 export interface ThemeDefinition {
   id: ThemeId;
@@ -20,12 +24,24 @@ export const THEMES: ThemeDefinition[] = [
   {
     id: "GRAVEYARD",
     label: "Graveyard",
-    patterns: [/graveyard/, /\bmill\b/, /from your graveyard/, /dies/],
+    patterns: [/graveyard/, /\bmill\b/, /from your graveyard/, /return .* from .* graveyard/],
   },
   {
     id: "SACRIFICE",
     label: "Sacrifice",
-    patterns: [/sacrifice/, /whenever .* dies/, /\bdies,/],
+    // Require a creature/permanent sacrifice or a death trigger — not Food costs.
+    patterns: [
+      /sacrifice (a|an|another|any number of) (creature|permanent|artifact|enchantment|tokens?)/,
+      /sacrifice (this permanent|~)/,
+      /whenever (a|another) creature (you control )?dies/,
+      /whenever .* creature dies/,
+    ],
+  },
+  {
+    id: "FOOD",
+    label: "Food",
+    patterns: [/\bfood\b/, /create .* food/, /sacrifice (a|an) food/],
+    typePatterns: [/\bfood\b/],
   },
   {
     id: "TOKENS",
@@ -40,14 +56,25 @@ export const THEMES: ThemeDefinition[] = [
   {
     id: "ARTIFACTS",
     label: "Artifacts",
-    patterns: [/artifact/, /metalcraft/, /affinity for artifacts/],
-    typePatterns: [/artifact/],
+    // Care about artifacts as a strategy — not "is an artifact".
+    patterns: [
+      /artifacts? you control/,
+      /artifact creatures? you control/,
+      /metalcraft/,
+      /affinity for artifacts/,
+      /whenever (you cast|an artifact)/,
+      /search .* artifact/,
+    ],
   },
   {
     id: "ENCHANTMENTS",
     label: "Enchantments",
-    patterns: [/enchantment/, /constellation/],
-    typePatterns: [/enchantment/],
+    patterns: [
+      /enchantments? you control/,
+      /constellation/,
+      /whenever .* enchantment enters/,
+      /search .* enchantment/,
+    ],
   },
   {
     id: "LIFEGAIN",
@@ -73,10 +100,11 @@ export const THEMES: ThemeDefinition[] = [
   {
     id: "BLINK",
     label: "Blink & ETB value",
+    // Broad "when ~ enters" matches almost every creature — keep exile/flicker only.
     patterns: [
       /exile .* return (it|them|that card) to the battlefield/,
-      /when .* enters/,
       /flicker/,
+      /blink/,
     ],
   },
   { id: "MILL", label: "Mill", patterns: [/mills? \w+ cards?/, /put .* into (your|their) graveyard/] },
@@ -102,7 +130,7 @@ export const THEMES: ThemeDefinition[] = [
   {
     id: "BIG_CREATURES",
     label: "Big creatures",
-    patterns: [/trample/, /power \d+ or greater/, /\bramp\b/],
+    patterns: [/trample/, /power \d+ or greater/, /creatures with power/],
   },
   {
     id: "GO_WIDE",

@@ -53,6 +53,7 @@ export const CARD_ROLE_LABELS: Record<CardRole, string> = {
 export type ThemeId =
   | "GRAVEYARD"
   | "SACRIFICE"
+  | "FOOD"
   | "TOKENS"
   | "PLUS_ONE_COUNTERS"
   | "ARTIFACTS"

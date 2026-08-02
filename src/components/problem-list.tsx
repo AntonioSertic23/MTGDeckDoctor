@@ -62,7 +62,7 @@ export function ProblemList({
               ) : null}
               {problem.affectedCards.length > 0 ? (
                 <ul className="flex flex-wrap gap-2 pt-1">
-                  {problem.affectedCards.slice(0, 8).map((name) => (
+                  {problem.affectedCards.map((name) => (
                     <li
                       key={name}
                       className="flex w-[7.25rem] flex-col items-center gap-1.5 text-center"

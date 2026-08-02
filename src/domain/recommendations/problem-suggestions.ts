@@ -7,7 +7,8 @@ import type {
   ResolvedDeck,
   SynergySummary,
 } from "@/domain/types";
-import { suggestAdditionsForRoles } from "@/domain/recommendations/additions";
+import { suggestAdditions, suggestAdditionsForRoles } from "@/domain/recommendations/additions";
+import { suggestCuts } from "@/domain/recommendations/cuts";
 import type { HealthThresholds } from "@/domain/analysis/health-config";
 import { DEFAULT_THRESHOLDS } from "@/domain/analysis/health-config";
 
@@ -47,6 +48,13 @@ export function enrichProblemsWithSuggestions(
   thresholds: HealthThresholds = DEFAULT_THRESHOLDS,
 ): Problem[] {
   return problems.map((problem) => {
+    if (problem.type === "TOO_MANY_CARDS") {
+      return enrichTooManyCards(problem, deck, stats, synergy, problems);
+    }
+    if (problem.type === "TOO_FEW_CARDS") {
+      return enrichTooFewCards(problem, deck, stats, synergy, thresholds);
+    }
+
     const roles = PROBLEM_SUGGESTION_ROLES[problem.type];
     if (!roles) return problem;
 
@@ -71,6 +79,71 @@ export function enrichProblemsWithSuggestions(
           .join(", ")}.`,
     };
   });
+}
+
+function enrichTooManyCards(
+  problem: Problem,
+  deck: ResolvedDeck,
+  stats: DeckStatistics,
+  synergy: SynergySummary,
+  problems: Problem[],
+): Problem {
+  const excess = Number(problem.evidence.excess) || Math.max(0, stats.totalCards - 100);
+  if (excess <= 0) return problem;
+
+  const cuts = suggestCuts(deck, stats, synergy, problems, excess, {
+    minScore: 0,
+    relaxFilters: true,
+  });
+  let names = cuts.map((c) => c.name);
+
+  if (names.length < excess) {
+    const already = new Set(names.map((n) => n.toLowerCase()));
+    const fillers = deck.entries
+      .filter((e) => !e.isCommander && !e.roles.includes("LAND"))
+      .filter((e) => !already.has(e.card.name.toLowerCase()))
+      .sort(
+        (a, b) =>
+          (synergy.cardScores[a.card.oracleId] ?? 50) - (synergy.cardScores[b.card.oracleId] ?? 50),
+      )
+      .map((e) => e.card.name);
+    names = [...names, ...fillers].slice(0, excess);
+  } else {
+    names = names.slice(0, excess);
+  }
+
+  if (names.length === 0) return problem;
+
+  return {
+    ...problem,
+    affectedCards: names,
+    suggestedFix: `Cut ${excess} card${excess === 1 ? "" : "s"} to reach 100. Strongest cut candidates: ${names
+      .slice(0, 5)
+      .join(", ")}${names.length > 5 ? "…" : ""}.`,
+  };
+}
+
+function enrichTooFewCards(
+  problem: Problem,
+  deck: ResolvedDeck,
+  stats: DeckStatistics,
+  synergy: SynergySummary,
+  thresholds: HealthThresholds,
+): Problem {
+  const missing = Number(problem.evidence.missing) || Math.max(0, 100 - stats.totalCards);
+  if (missing <= 0) return problem;
+
+  const suggestions = suggestAdditions(deck, stats, synergy, thresholds, missing);
+  if (suggestions.length === 0) return problem;
+
+  return {
+    ...problem,
+    suggestions,
+    suggestedFix: `Add ${missing} card${missing === 1 ? "" : "s"} to reach 100. Consider: ${suggestions
+      .slice(0, 5)
+      .map((s) => s.name)
+      .join(", ")}${suggestions.length > 5 ? "…" : ""}.`,
+  };
 }
 
 /** Staple picks for health categories that are currently below target. */
