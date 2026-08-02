@@ -9,6 +9,7 @@ import type {
   DeckWithCards,
   InventoryItem,
 } from "@/domain/types";
+import { normalizeDeck } from "@/domain/decks/normalize";
 import type { DeckRepository } from "@/lib/storage/repository";
 
 const DB_NAME = "mtg-deck-doctor";
@@ -57,7 +58,7 @@ export const idbRepository: DeckRepository = {
   async listDecks() {
     const db = await getDb();
     const decks = await db.getAll("decks");
-    return decks.sort((a, b) => a.name.localeCompare(b.name));
+    return decks.map(normalizeDeck).sort((a, b) => a.name.localeCompare(b.name));
   },
 
   async getDeck(id) {
@@ -65,7 +66,7 @@ export const idbRepository: DeckRepository = {
     const deck = await db.get("decks", id);
     if (!deck) return null;
     const cards = await db.getAllFromIndex("deckCards", "byDeck", id);
-    return { deck, cards: cards.map(toDeckCard) };
+    return { deck: normalizeDeck(deck), cards: cards.map(toDeckCard) };
   },
 
   async listDecksWithCards() {
@@ -81,14 +82,18 @@ export const idbRepository: DeckRepository = {
     }
 
     return decks
-      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(normalizeDeck)
+      .sort((a, b) => {
+        if (a.ready !== b.ready) return a.ready ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      })
       .map((deck) => ({ deck, cards: byDeck.get(deck.id) ?? [] }));
   },
 
   async createDeck(deck, cards) {
     const db = await getDb();
     const tx = db.transaction(["decks", "deckCards"], "readwrite");
-    await tx.objectStore("decks").put(deck);
+    await tx.objectStore("decks").put(normalizeDeck(deck));
     const store = tx.objectStore("deckCards");
     for (const card of cards) {
       await store.put({ ...card, id: deckCardKey(deck.id, card.oracleId), deckId: deck.id });
@@ -98,7 +103,10 @@ export const idbRepository: DeckRepository = {
 
   async updateDeck(deck) {
     const db = await getDb();
-    await db.put("decks", { ...deck, updatedAt: new Date().toISOString() });
+    await db.put("decks", {
+      ...normalizeDeck(deck),
+      updatedAt: new Date().toISOString(),
+    });
   },
 
   async setDeckCards(deckId, cards) {

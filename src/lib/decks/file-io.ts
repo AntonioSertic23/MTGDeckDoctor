@@ -1,4 +1,5 @@
 import type { Card, Deck, DeckCard, DeckWithCards, InventoryItem } from "@/domain/types";
+import { normalizeDeck } from "@/domain/decks/normalize";
 import { getRepository } from "@/lib/storage";
 
 export const DECK_FILE_VERSION = 1 as const;
@@ -96,7 +97,7 @@ export async function importDecksFromFile(file: File): Promise<{ imported: numbe
 }
 
 function sanitizeDeck(deck: Deck): Deck {
-  return {
+  return normalizeDeck({
     id: String(deck.id),
     name: String(deck.name || "Imported deck"),
     format: deck.format === "other" ? "other" : "commander",
@@ -104,9 +105,13 @@ function sanitizeDeck(deck: Deck): Deck {
       ? deck.commanderOracleIds.map(String)
       : [],
     description: deck.description,
+    ready: Boolean(deck.ready),
+    timesBrought: Math.max(0, Number(deck.timesBrought) || 0),
+    timesPlayed: Math.max(0, Number(deck.timesPlayed) || 0),
     createdAt: deck.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-  };
+    analysisSnapshot: null,
+  });
 }
 
 function sanitizeDeckCards(cards: DeckCard[]): DeckCard[] {

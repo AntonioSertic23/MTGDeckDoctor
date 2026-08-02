@@ -33,11 +33,14 @@ Header badge: **Cloud** = Supabase env present, **Local** = IndexedDB only.
 2. In **Authentication → Providers**, enable **Email** (password). You can disable Anonymous.
 3. **Authentication → URL configuration**: set **Site URL** to your app (e.g. `http://localhost:3000` locally, or your Netlify URL in production). Add the same under Redirect URLs.
 4. Optional but handy for local testing: **Authentication → Providers → Email → Confirm email** → off (otherwise new users must confirm by email first).
-5. In **SQL Editor**, run the contents of [`supabase/schema.sql`](./supabase/schema.sql) (includes `analysis_snapshot` on `decks`).
-   If the project already existed, at least run:
+5. In **SQL Editor**, run the contents of [`supabase/schema.sql`](./supabase/schema.sql).
+   If the project already existed, run the alters (or [`supabase/add-ready-play-counters.sql`](./supabase/add-ready-play-counters.sql)):
 
    ```sql
    alter table public.decks add column if not exists analysis_snapshot jsonb;
+   alter table public.decks add column if not exists ready boolean not null default false;
+   alter table public.decks add column if not exists times_brought integer not null default 0;
+   alter table public.decks add column if not exists times_played integer not null default 0;
    ```
 6. Copy Project URL and Publishable (or legacy anon) key from **Project Settings → API**.
 7. Create `.env.local` from `.env.example`:

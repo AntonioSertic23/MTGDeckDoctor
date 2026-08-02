@@ -8,6 +8,7 @@ import { getCachedOrAnalyzeDeck } from "@/lib/decks/analyze-local";
 import { useDeck, useDecksWithCards } from "@/lib/hooks/use-repository";
 import { getRepository } from "@/lib/storage";
 import { buildSharedCardIndex, findSharedCards } from "@/domain/sharing/shared-cards";
+import type { Deck } from "@/domain/types";
 import { HealthMeter } from "@/components/health-meter";
 import { ProblemList, type CardVisual } from "@/components/problem-list";
 import { AdditionList, CutList } from "@/components/recommendation-lists";
@@ -150,6 +151,14 @@ export default function DeckDetailPage() {
     });
   }
 
+  function patchDeck(patch: Partial<Deck>) {
+    if (!deck) return;
+    startBusy(async () => {
+      await getRepository().updateDeck({ ...deck.deck, ...patch });
+      await refresh();
+    });
+  }
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -196,6 +205,84 @@ export default function DeckDetailPage() {
           </>
         }
       />
+
+      <Panel>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold">Table ready</h2>
+            <p className="mt-1 text-sm text-muted">
+              Mark when the physical list is built, then tap when you bring or play it.
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={busy || deleting}
+            onClick={() => patchDeck({ ready: !deck.deck.ready })}
+            className={cn(
+              "inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold transition",
+              deck.deck.ready
+                ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                : "border border-[var(--border)] bg-[var(--card)] text-ink hover:bg-black/[0.03] dark:hover:bg-white/[0.04]",
+            )}
+          >
+            {deck.deck.ready ? "Ready to play" : "Mark as ready"}
+          </button>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-xl border border-[var(--border)] p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted">Brought</p>
+            <p className="mt-1 font-[family-name:var(--font-display)] text-3xl font-semibold tabular-nums">
+              {deck.deck.timesBrought}
+            </p>
+            <div className="mt-3 flex gap-2">
+              <Button
+                variant="secondary"
+                className="flex-1 py-2 text-xs"
+                disabled={busy || deleting}
+                onClick={() => patchDeck({ timesBrought: deck.deck.timesBrought + 1 })}
+              >
+                + Brought
+              </Button>
+              <Button
+                variant="ghost"
+                className="px-3 py-2 text-xs"
+                disabled={busy || deleting || deck.deck.timesBrought <= 0}
+                onClick={() =>
+                  patchDeck({ timesBrought: Math.max(0, deck.deck.timesBrought - 1) })
+                }
+              >
+                −
+              </Button>
+            </div>
+          </div>
+          <div className="rounded-xl border border-[var(--border)] p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted">Played</p>
+            <p className="mt-1 font-[family-name:var(--font-display)] text-3xl font-semibold tabular-nums">
+              {deck.deck.timesPlayed}
+            </p>
+            <div className="mt-3 flex gap-2">
+              <Button
+                variant="secondary"
+                className="flex-1 py-2 text-xs"
+                disabled={busy || deleting}
+                onClick={() => patchDeck({ timesPlayed: deck.deck.timesPlayed + 1 })}
+              >
+                + Game
+              </Button>
+              <Button
+                variant="ghost"
+                className="px-3 py-2 text-xs"
+                disabled={busy || deleting || deck.deck.timesPlayed <= 0}
+                onClick={() =>
+                  patchDeck({ timesPlayed: Math.max(0, deck.deck.timesPlayed - 1) })
+                }
+              >
+                −
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Panel>
 
       {analysis ? (
         <CommanderPanel

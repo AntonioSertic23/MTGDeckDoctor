@@ -36,13 +36,19 @@ create table if not exists public.decks (
   format text not null default 'commander',
   commander_oracle_ids text[] not null default '{}',
   description text,
+  ready boolean not null default false,
+  times_brought integer not null default 0 check (times_brought >= 0),
+  times_played integer not null default 0 check (times_played >= 0),
   analysis_snapshot jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
--- Existing projects created before analysis caching:
+-- Existing projects created before analysis caching / play tracking:
 alter table public.decks add column if not exists analysis_snapshot jsonb;
+alter table public.decks add column if not exists ready boolean not null default false;
+alter table public.decks add column if not exists times_brought integer not null default 0;
+alter table public.decks add column if not exists times_played integer not null default 0;
 
 create index if not exists decks_user_id_idx on public.decks (user_id);
 

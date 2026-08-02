@@ -59,6 +59,9 @@ export default function DashboardPage() {
     const strongest = [...analyzed].sort(
       (a, b) => b.analysis.health.overall - a.analysis.health.overall,
     )[0];
+    const readyCount = decks.filter((d) => d.deck.ready).length;
+    const broughtTotal = decks.reduce((sum, d) => sum + d.deck.timesBrought, 0);
+    const playedTotal = decks.reduce((sum, d) => sum + d.deck.timesPlayed, 0);
 
     return {
       analyzedCount: analyzed.length,
@@ -67,6 +70,9 @@ export default function DashboardPage() {
       missingCommander,
       problemCount,
       strongest,
+      readyCount,
+      broughtTotal,
+      playedTotal,
     };
   }, [decks, scores]);
 
@@ -118,16 +124,16 @@ export default function DashboardPage() {
       />
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatPanel label="Decks" value={decks.length} hint={`${clinic.analyzedCount} diagnosed`} />
+        <StatPanel label="Decks" value={decks.length} hint={`${clinic.readyCount} ready to play`} />
         <StatPanel
           label="Avg health"
           value={clinic.overallAvg ?? "—"}
           hint={clinic.overallAvg !== null ? "/ 100" : "Still analyzing"}
         />
         <StatPanel
-          label="Need attention"
-          value={clinic.needingAttention.length}
-          hint={clinic.problemCount > 0 ? `${clinic.problemCount} open problems` : "Looking solid"}
+          label="Brought / played"
+          value={`${clinic.broughtTotal}/${clinic.playedTotal}`}
+          hint="Across all lists"
         />
         <StatPanel
           label="Shared ≥ €5"

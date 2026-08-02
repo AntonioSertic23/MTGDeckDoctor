@@ -44,6 +44,9 @@ interface DeckRow {
   format: string;
   commander_oracle_ids: string[];
   description: string | null;
+  ready?: boolean | null;
+  times_brought?: number | null;
+  times_played?: number | null;
   created_at: string;
   updated_at: string;
   analysis_snapshot?: DeckAnalysisSnapshot | null;
@@ -111,6 +114,9 @@ function toDeck(row: DeckRow): Deck {
     format: (row.format as DeckFormat) || "commander",
     commanderOracleIds: row.commander_oracle_ids ?? [],
     description: row.description ?? undefined,
+    ready: Boolean(row.ready),
+    timesBrought: Math.max(0, Number(row.times_brought) || 0),
+    timesPlayed: Math.max(0, Number(row.times_played) || 0),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     analysisSnapshot: row.analysis_snapshot ?? null,
@@ -204,6 +210,9 @@ export const supabaseRepository: DeckRepository = {
       format: deck.format,
       commander_oracle_ids: deck.commanderOracleIds,
       description: deck.description ?? null,
+      ready: deck.ready ?? false,
+      times_brought: deck.timesBrought ?? 0,
+      times_played: deck.timesPlayed ?? 0,
       created_at: deck.createdAt,
       updated_at: deck.updatedAt,
     });
@@ -231,6 +240,9 @@ export const supabaseRepository: DeckRepository = {
         format: deck.format,
         commander_oracle_ids: deck.commanderOracleIds,
         description: deck.description ?? null,
+        ready: deck.ready ?? false,
+        times_brought: deck.timesBrought ?? 0,
+        times_played: deck.timesPlayed ?? 0,
         updated_at: new Date().toISOString(),
         // Keep existing snapshot unless callers cleared it (e.g. commander change).
         analysis_snapshot: deck.analysisSnapshot ?? null,

@@ -48,7 +48,14 @@ export function DeckClinicList({
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                    <h3 className="truncate font-semibold text-ink">{deck.name}</h3>
+                    <h3 className="truncate font-semibold text-ink">
+                      {deck.name}
+                      {deck.ready ? (
+                        <span className="ml-2 align-middle text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                          Ready
+                        </span>
+                      ) : null}
+                    </h3>
                     <span className="shrink-0 text-xs text-muted">
                       Updated {formatRelative(deck.updatedAt)}
                     </span>
@@ -57,6 +64,9 @@ export function DeckClinicList({
                     {commanders.length > 0
                       ? commanders.map((c) => c.name).join(" / ")
                       : "Commander not set"}
+                  </p>
+                  <p className="mt-1 text-xs tabular-nums text-muted">
+                    Brought {deck.timesBrought} · Played {deck.timesPlayed}
                   </p>
                   {status ? (
                     <span
