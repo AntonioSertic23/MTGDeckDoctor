@@ -43,10 +43,11 @@
   }
 
   body {
-    background:
+    background-color: var(--background);
+    background-image:
       radial-gradient(1200px 500px at 10% -10%, color-mix(in oklab, var(--accent) 12%, transparent), transparent 55%),
-      radial-gradient(900px 420px at 100% 0%, color-mix(in oklab, #4a7eb0 10%, transparent), transparent 50%),
-      var(--background);
+      radial-gradient(900px 420px at 100% 0%, color-mix(in oklab, #4a7eb0 10%, transparent), transparent 50%);
+    background-repeat: no-repeat;
     color: var(--ink);
     font-family: var(--font-sans);
     padding-bottom: env(safe-area-inset-bottom);
