@@ -127,6 +127,47 @@ async function requireUserId(): Promise<string> {
   return ensureSupabaseUserId();
 }
 
+/** Keep `.in()` filters under typical URL / gateway limits. */
+const IN_FILTER_CHUNK = 100;
+
+/** PostgREST default max rows is 1000 — page past it for multi-deck loads. */
+const PAGE_SIZE = 1000;
+
+function chunkIds<T>(items: T[], size: number): T[][] {
+  if (items.length === 0) return [];
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+async function fetchAllDeckCards(
+  supabase: ReturnType<typeof getSupabaseBrowserClient>,
+  deckIds: string[],
+): Promise<DeckCardRow[]> {
+  if (deckIds.length === 0) return [];
+
+  const rows: DeckCardRow[] = [];
+  for (const idChunk of chunkIds(deckIds, IN_FILTER_CHUNK)) {
+    let from = 0;
+    for (;;) {
+      const to = from + PAGE_SIZE - 1;
+      const { data, error } = await supabase
+        .from("deck_cards")
+        .select("deck_id, oracle_id, quantity")
+        .in("deck_id", idChunk)
+        .range(from, to);
+      if (error) throw error;
+      const page = (data as DeckCardRow[]) ?? [];
+      rows.push(...page);
+      if (page.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
+    }
+  }
+  return rows;
+}
+
 export const supabaseRepository: DeckRepository = {
   async listDecks() {
     const supabase = getSupabaseBrowserClient();
@@ -181,14 +222,10 @@ export const supabaseRepository: DeckRepository = {
     if (deckRows.length === 0) return [];
 
     const ids = deckRows.map((d) => d.id);
-    const { data: cardRows, error: cardsError } = await supabase
-      .from("deck_cards")
-      .select("deck_id, oracle_id, quantity")
-      .in("deck_id", ids);
-    if (cardsError) throw cardsError;
+    const cardRows = await fetchAllDeckCards(supabase, ids);
 
     const byDeck = new Map<string, DeckCard[]>();
-    for (const row of (cardRows as DeckCardRow[]) ?? []) {
+    for (const row of cardRows) {
       const list = byDeck.get(row.deck_id) ?? [];
       list.push({ oracleId: row.oracle_id, quantity: row.quantity });
       byDeck.set(row.deck_id, list);
@@ -299,12 +336,18 @@ export const supabaseRepository: DeckRepository = {
   },
 
   async getCards(oracleIds) {
-    if (oracleIds.length === 0) return [];
+    const unique = [...new Set(oracleIds.filter(Boolean))];
+    if (unique.length === 0) return [];
     const supabase = getSupabaseBrowserClient();
     await requireUserId();
-    const { data, error } = await supabase.from("cards").select("*").in("oracle_id", oracleIds);
-    if (error) throw error;
-    return ((data as CardRow[]) ?? []).map(toCard);
+
+    const cards: Card[] = [];
+    for (const idChunk of chunkIds(unique, IN_FILTER_CHUNK)) {
+      const { data, error } = await supabase.from("cards").select("*").in("oracle_id", idChunk);
+      if (error) throw error;
+      cards.push(...((data as CardRow[]) ?? []).map(toCard));
+    }
+    return cards;
   },
 
   async getAllCards() {

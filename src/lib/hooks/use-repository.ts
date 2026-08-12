@@ -40,17 +40,21 @@ export function useDecksWithCards() {
     try {
       setError(null);
       const repo = getRepository();
-      const [list, allCards, inv] = await Promise.all([
+      // Load decks + inventory first, then cards by id — avoids getAllCards()
+      // re-fetching decks and blowing up PostgREST `.in()` URL length.
+      const [list, inv] = await Promise.all([
         repo.listDecksWithCards(),
-        repo.getAllCards(),
         repo.listInventory(),
       ]);
 
-      const cardMap = new Map(allCards.map((c) => [c.oracleId, c]));
       const neededIds = new Set<string>();
       for (const { cards: deckCards } of list) {
         for (const deckCard of deckCards) neededIds.add(deckCard.oracleId);
       }
+      for (const item of inv) neededIds.add(item.oracleId);
+
+      const allCards = await repo.getCards([...neededIds]);
+      const cardMap = new Map(allCards.map((c) => [c.oracleId, c]));
 
       const missingOrNoArt = [...neededIds].filter((id) => {
         const card = cardMap.get(id);
@@ -73,7 +77,13 @@ export function useDecksWithCards() {
       setCards(cardMap);
       setInventory(inv);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load data.");
+      const message =
+        err instanceof Error
+          ? err.message
+          : err && typeof err === "object" && "message" in err && typeof (err as { message: unknown }).message === "string"
+            ? (err as { message: string }).message
+            : "Could not load data.";
+      setError(message);
     } finally {
       setLoading(false);
     }
