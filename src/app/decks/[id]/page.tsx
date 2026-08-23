@@ -40,8 +40,13 @@ export default function DeckDetailPage() {
   const [analysis, setAnalysis] = useState<LocalAnalysis | null>(null);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>("overview");
+  const [notesDraft, setNotesDraft] = useState("");
   const [deleting, startDelete] = useTransition();
   const [busy, startBusy] = useTransition();
+
+  useEffect(() => {
+    setNotesDraft(deck?.deck.description ?? "");
+  }, [deck?.deck.id, deck?.deck.description]);
 
   useEffect(() => {
     let cancelled = false;
@@ -159,6 +164,21 @@ export default function DeckDetailPage() {
     });
   }
 
+  const savedNotes = deck.deck.description ?? "";
+  const notesDirty = notesDraft !== savedNotes;
+
+  function saveNotes() {
+    const next = notesDraft.trim();
+    patchDeck({ description: next || undefined });
+  }
+
+  function clearNotes() {
+    if (!savedNotes && !notesDraft.trim()) return;
+    if (!window.confirm("Clear notes for this deck?")) return;
+    setNotesDraft("");
+    patchDeck({ description: undefined });
+  }
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -171,6 +191,18 @@ export default function DeckDetailPage() {
         }
         actions={
           <>
+            <button
+              type="button"
+              disabled={deleting || busy}
+              onClick={() => patchDeck({ ready: !deck.deck.ready })}
+              className={cn(
+                buttonClassName(deck.deck.ready ? "primary" : "secondary"),
+                deck.deck.ready &&
+                  "border-emerald-600 bg-emerald-600 hover:bg-emerald-700 dark:border-emerald-500 dark:bg-emerald-600 dark:hover:bg-emerald-500",
+              )}
+            >
+              {deck.deck.ready ? "Ready to play" : "Mark as ready"}
+            </button>
             <Link href={`/decks/new?replace=${deck.deck.id}`} className={buttonClassName("secondary")}>
               Replace list
             </Link>
@@ -206,81 +238,36 @@ export default function DeckDetailPage() {
         }
       />
 
-      <Panel>
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold">Table ready</h2>
-            <p className="mt-1 text-sm text-muted">
-              Mark when the physical list is built, then tap when you bring or play it.
-            </p>
-          </div>
-          <button
-            type="button"
-            disabled={busy || deleting}
-            onClick={() => patchDeck({ ready: !deck.deck.ready })}
-            className={cn(
-              "inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold transition",
-              deck.deck.ready
-                ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                : "border border-[var(--border)] bg-[var(--card)] text-ink hover:bg-black/[0.03] dark:hover:bg-white/[0.04]",
-            )}
-          >
-            {deck.deck.ready ? "Ready to play" : "Mark as ready"}
-          </button>
+      <Panel className="space-y-3">
+        <div>
+          <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold">Notes</h2>
+          <p className="mt-1 text-sm text-muted">
+            Strategy, upgrades, playtest reminders — anything useful for this list.
+          </p>
         </div>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <div className="rounded-xl border border-[var(--border)] p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted">Brought</p>
-            <p className="mt-1 font-[family-name:var(--font-display)] text-3xl font-semibold tabular-nums">
-              {deck.deck.timesBrought}
-            </p>
-            <div className="mt-3 flex gap-2">
-              <Button
-                variant="secondary"
-                className="flex-1 py-2 text-xs"
-                disabled={busy || deleting}
-                onClick={() => patchDeck({ timesBrought: deck.deck.timesBrought + 1 })}
-              >
-                + Brought
-              </Button>
-              <Button
-                variant="ghost"
-                className="px-3 py-2 text-xs"
-                disabled={busy || deleting || deck.deck.timesBrought <= 0}
-                onClick={() =>
-                  patchDeck({ timesBrought: Math.max(0, deck.deck.timesBrought - 1) })
-                }
-              >
-                −
-              </Button>
-            </div>
-          </div>
-          <div className="rounded-xl border border-[var(--border)] p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted">Played</p>
-            <p className="mt-1 font-[family-name:var(--font-display)] text-3xl font-semibold tabular-nums">
-              {deck.deck.timesPlayed}
-            </p>
-            <div className="mt-3 flex gap-2">
-              <Button
-                variant="secondary"
-                className="flex-1 py-2 text-xs"
-                disabled={busy || deleting}
-                onClick={() => patchDeck({ timesPlayed: deck.deck.timesPlayed + 1 })}
-              >
-                + Game
-              </Button>
-              <Button
-                variant="ghost"
-                className="px-3 py-2 text-xs"
-                disabled={busy || deleting || deck.deck.timesPlayed <= 0}
-                onClick={() =>
-                  patchDeck({ timesPlayed: Math.max(0, deck.deck.timesPlayed - 1) })
-                }
-              >
-                −
-              </Button>
-            </div>
-          </div>
+        <textarea
+          value={notesDraft}
+          onChange={(e) => setNotesDraft(e.target.value)}
+          rows={5}
+          placeholder="Add notes for this deck…"
+          disabled={busy || deleting}
+          className="w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2.5 text-sm leading-relaxed outline-none ring-accent focus:ring-2 disabled:opacity-60"
+        />
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="primary"
+            disabled={busy || deleting || !notesDirty}
+            onClick={saveNotes}
+          >
+            Save notes
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={busy || deleting || (!savedNotes && !notesDraft.trim())}
+            onClick={clearNotes}
+          >
+            Clear
+          </Button>
         </div>
       </Panel>
 

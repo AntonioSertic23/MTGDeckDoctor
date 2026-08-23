@@ -28,8 +28,19 @@ export function DeckClinicList({
           <li key={deck.id}>
             <Link
               href={`/decks/${deck.id}`}
-              className="block rounded-2xl border border-[var(--border)] p-3 transition hover:border-accent/40 hover:bg-accent/[0.03] sm:p-4"
+              className={cn(
+                "relative block overflow-hidden rounded-2xl border p-3 transition sm:p-4",
+                deck.ready
+                  ? "border-emerald-500/50 bg-emerald-500/[0.06] shadow-sm shadow-emerald-500/10 hover:border-emerald-500/70 hover:bg-emerald-500/[0.09]"
+                  : "border-[var(--border)] hover:border-accent/40 hover:bg-accent/[0.03]",
+              )}
             >
+              {deck.ready ? (
+                <span
+                  className="absolute inset-y-0 left-0 w-1 bg-emerald-500"
+                  aria-hidden
+                />
+              ) : null}
               <div className="flex gap-3">
                 <div className="flex shrink-0 gap-2">
                   {commanders.length > 0 ? (
@@ -51,7 +62,7 @@ export function DeckClinicList({
                     <h3 className="truncate font-semibold text-ink">
                       {deck.name}
                       {deck.ready ? (
-                        <span className="ml-2 align-middle text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                        <span className="ml-2 inline-flex align-middle items-center rounded-full bg-emerald-600/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800 dark:bg-emerald-400/20 dark:text-emerald-200">
                           Ready
                         </span>
                       ) : null}
@@ -64,9 +75,6 @@ export function DeckClinicList({
                     {commanders.length > 0
                       ? commanders.map((c) => c.name).join(" / ")
                       : "Commander not set"}
-                  </p>
-                  <p className="mt-1 text-xs tabular-nums text-muted">
-                    Brought {deck.timesBrought} · Played {deck.timesPlayed}
                   </p>
                   {status ? (
                     <span
