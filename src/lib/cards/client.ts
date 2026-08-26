@@ -41,16 +41,26 @@ export async function searchCards(query: string): Promise<Card[]> {
   return data.cards;
 }
 
+const BY_ORACLE_BATCH = 400;
+
 export async function resolveCardsByOracleIds(oracleIds: string[]): Promise<Card[]> {
   if (oracleIds.length === 0) return [];
-  const response = await fetch("/api/cards/by-oracle", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ oracleIds }),
-  });
-  const data = (await response.json()) as { cards?: Card[]; error?: string };
-  if (!response.ok) {
-    throw new Error(data.error ?? "Could not load card art.");
+  const unique = [...new Set(oracleIds.filter((id) => id.trim().length > 0))];
+  const cards: Card[] = [];
+
+  for (let i = 0; i < unique.length; i += BY_ORACLE_BATCH) {
+    const batch = unique.slice(i, i + BY_ORACLE_BATCH);
+    const response = await fetch("/api/cards/by-oracle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ oracleIds: batch }),
+    });
+    const data = (await response.json()) as { cards?: Card[]; error?: string };
+    if (!response.ok) {
+      throw new Error(data.error ?? "Could not load card art.");
+    }
+    cards.push(...(data.cards ?? []));
   }
-  return data.cards ?? [];
+
+  return cards;
 }

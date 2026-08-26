@@ -119,3 +119,52 @@ export function useDeck(id: string) {
 
   return { deck, loading, error, refresh, setDeck };
 }
+
+/** Inventory + card cache for the Collection page (no deck lists). */
+export function useInventory() {
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [cards, setCards] = useState<Map<string, Card>>(new Map());
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      setError(null);
+      const repo = getRepository();
+      const inv = await repo.listInventory();
+      const neededIds = inv.map((item) => item.oracleId);
+      const allCards = await repo.getCards(neededIds);
+      const cardMap = new Map(allCards.map((c) => [c.oracleId, c]));
+
+      const missingOrNoArt = neededIds.filter((id) => {
+        const card = cardMap.get(id);
+        return !card || !card.imageUri;
+      });
+
+      if (missingOrNoArt.length > 0) {
+        try {
+          const hydrated = await resolveCardsByOracleIds(missingOrNoArt);
+          if (hydrated.length > 0) {
+            await repo.saveCards(hydrated);
+            for (const card of hydrated) cardMap.set(card.oracleId, card);
+          }
+        } catch {
+          // Offline / Scryfall down — keep local cache.
+        }
+      }
+
+      setInventory(inv);
+      setCards(cardMap);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load collection.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  return { inventory, cards, loading, error, refresh };
+}

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { Activity, Layers, LayoutDashboard, LogIn, Plus, Share2 } from "lucide-react";
+import { Activity, Layers, LayoutDashboard, Library, LogIn, Plus, Share2 } from "lucide-react";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { getStorageBackend } from "@/lib/storage";
 import { Button } from "@/components/ui";
@@ -12,8 +12,9 @@ import { cn } from "@/lib/utils";
 const NAV = [
   { href: "/", label: "Home", icon: LayoutDashboard },
   { href: "/decks", label: "Decks", icon: Layers },
-  { href: "/decks/new", label: "Import", icon: Plus },
+  { href: "/collection", label: "Collection", icon: Library },
   { href: "/shared", label: "Shared", icon: Share2 },
+  { href: "/decks/new", label: "Import", icon: Plus },
 ] as const;
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -140,7 +141,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           className="fixed inset-x-0 bottom-0 z-30 border-t border-[var(--border)] bg-[color-mix(in_oklab,var(--card)_92%,transparent)] pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden"
           aria-label="Mobile"
         >
-          <ul className="mx-auto grid max-w-lg grid-cols-4">
+          <ul className="mx-auto grid max-w-lg grid-cols-5">
             {NAV.map((item) => {
               const Icon = item.icon;
               const active =

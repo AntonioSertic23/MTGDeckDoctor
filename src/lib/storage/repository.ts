@@ -32,6 +32,8 @@ export interface DeckRepository {
 
   listInventory(): Promise<InventoryItem[]>;
   setInventoryQuantity(oracleId: string, quantity: number): Promise<void>;
+  /** Upsert many inventory rows (collection import). Quantity ≤ 0 removes the row. */
+  setInventoryItems(items: InventoryItem[]): Promise<void>;
 
   listAllocations(): Promise<CardAllocation[]>;
   /** Moves a physical copy between decks without touching decklist membership. */

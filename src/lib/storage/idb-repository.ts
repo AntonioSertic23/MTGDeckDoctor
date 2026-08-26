@@ -186,6 +186,17 @@ export const idbRepository: DeckRepository = {
     else await db.put("inventory", { oracleId, quantity });
   },
 
+  async setInventoryItems(items) {
+    if (items.length === 0) return;
+    const db = await getDb();
+    const tx = db.transaction("inventory", "readwrite");
+    for (const item of items) {
+      if (item.quantity <= 0) await tx.store.delete(item.oracleId);
+      else await tx.store.put({ oracleId: item.oracleId, quantity: item.quantity });
+    }
+    await tx.done;
+  },
+
   async listAllocations() {
     const db = await getDb();
     return db.getAll("allocations");

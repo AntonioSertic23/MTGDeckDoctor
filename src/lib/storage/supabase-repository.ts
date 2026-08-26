@@ -386,23 +386,41 @@ export const supabaseRepository: DeckRepository = {
   },
 
   async setInventoryQuantity(oracleId, quantity) {
+    await this.setInventoryItems([{ oracleId, quantity }]);
+  },
+
+  async setInventoryItems(items) {
+    if (items.length === 0) return;
     const supabase = getSupabaseBrowserClient();
     const userId = await requireUserId();
-    if (quantity <= 0) {
+
+    const toDelete = items.filter((item) => item.quantity <= 0).map((item) => item.oracleId);
+    const toUpsert = items.filter((item) => item.quantity > 0);
+
+    if (toDelete.length > 0) {
       const { error } = await supabase
         .from("inventory_items")
         .delete()
         .eq("user_id", userId)
-        .eq("oracle_id", oracleId);
+        .in("oracle_id", toDelete);
       if (error) throw error;
-      return;
     }
-    const { error } = await supabase.from("inventory_items").upsert({
-      user_id: userId,
-      oracle_id: oracleId,
-      quantity,
-    });
-    if (error) throw error;
+
+    if (toUpsert.length === 0) return;
+
+    // PostgREST prefers moderate payloads; chunk large collection imports.
+    const chunkSize = 200;
+    for (let i = 0; i < toUpsert.length; i += chunkSize) {
+      const chunk = toUpsert.slice(i, i + chunkSize);
+      const { error } = await supabase.from("inventory_items").upsert(
+        chunk.map((item) => ({
+          user_id: userId,
+          oracle_id: item.oracleId,
+          quantity: item.quantity,
+        })),
+      );
+      if (error) throw error;
+    }
   },
 
   async listAllocations() {
