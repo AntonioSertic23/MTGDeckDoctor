@@ -1,6 +1,15 @@
 import { analyzeDeck, resolveDeck } from "@/domain/analysis/analyze";
+import { DEFAULT_THRESHOLDS } from "@/domain/analysis/health-config";
 import { suggestAdditions } from "@/domain/recommendations/additions";
-import { suggestionsForHealthCategories } from "@/domain/recommendations/problem-suggestions";
+import {
+  buildCollectionContext,
+  type CollectionContext,
+} from "@/domain/recommendations/collection-aware";
+import { suggestCuts } from "@/domain/recommendations/cuts";
+import {
+  enrichProblemsWithSuggestions,
+  suggestionsForHealthCategories,
+} from "@/domain/recommendations/problem-suggestions";
 import type {
   AdditionCandidate,
   CardPrices,
@@ -8,6 +17,7 @@ import type {
   DeckAnalysisSnapshot,
   DeckWithCards,
   HealthCategoryId,
+  Problem,
   ResolvedDeck,
 } from "@/domain/types";
 import { resolveCardNames } from "@/lib/cards/client";
@@ -46,21 +56,7 @@ export async function getCachedOrAnalyzeDeck(
 
   if (!options.force && snap && snap.contentKey === key) {
     const resolved = await resolveOnly(deck);
-    const problems = await hydrateProblemSuggestionArt(snap.analysis.problems);
-    const healthSuggestions = await withHealthSuggestionArt(
-      suggestionsForHealthCategories(
-        resolved,
-        snap.analysis.statistics,
-        snap.analysis.synergy,
-        snap.analysis.health.categories,
-      ),
-    );
-    return {
-      resolved,
-      analysis: { ...snap.analysis, problems },
-      additions: await withAdditionArt(snap.additions),
-      healthSuggestions,
-    };
+    return finishWithCollection(resolved, snap.analysis);
   }
 
   const result = await analyzeDeckLocal(deck);
@@ -79,11 +75,39 @@ export async function getCachedOrAnalyzeDeck(
 export async function analyzeDeckLocal(deck: DeckWithCards): Promise<LocalAnalysis> {
   const resolved = await resolveOnly(deck);
   const analysis = analyzeDeck(resolved);
-  const rawAdditions = suggestAdditions(resolved, analysis.statistics, analysis.synergy);
-  const additions = await withAdditionArt(rawAdditions);
+  return finishWithCollection(resolved, analysis);
+}
 
-  const problemsWithArt = await hydrateProblemSuggestionArt(analysis.problems);
-  analysis.problems = problemsWithArt;
+async function finishWithCollection(
+  resolved: ResolvedDeck,
+  analysis: DeckAnalysis,
+): Promise<LocalAnalysis> {
+  const collection = await loadCollectionContext(resolved);
+  const additions = await withAdditionArt(
+    suggestAdditions(
+      resolved,
+      analysis.statistics,
+      analysis.synergy,
+      DEFAULT_THRESHOLDS,
+      12,
+      collection,
+    ),
+  );
+
+  const cuts = suggestCuts(resolved, analysis.statistics, analysis.synergy, analysis.problems, 12, {
+    collection,
+  });
+
+  const problems = await hydrateProblemSuggestionArt(
+    enrichProblemsWithSuggestions(
+      stripSuggestions(analysis.problems),
+      resolved,
+      analysis.statistics,
+      analysis.synergy,
+      DEFAULT_THRESHOLDS,
+      collection,
+    ),
+  );
 
   const healthSuggestions = await withHealthSuggestionArt(
     suggestionsForHealthCategories(
@@ -91,10 +115,41 @@ export async function analyzeDeckLocal(deck: DeckWithCards): Promise<LocalAnalys
       analysis.statistics,
       analysis.synergy,
       analysis.health.categories,
+      DEFAULT_THRESHOLDS,
+      collection,
     ),
   );
 
-  return { resolved, analysis, additions, healthSuggestions };
+  return {
+    resolved,
+    analysis: { ...analysis, cuts, problems },
+    additions,
+    healthSuggestions,
+  };
+}
+
+async function loadCollectionContext(resolved: ResolvedDeck): Promise<CollectionContext | null> {
+  const repo = getRepository();
+  const [inventory, allDecks] = await Promise.all([
+    repo.listInventory(),
+    repo.listDecksWithCards(),
+  ]);
+  if (inventory.length === 0 && allDecks.length <= 1) return null;
+
+  const ownedCards =
+    inventory.length > 0 ? await repo.getCards(inventory.map((item) => item.oracleId)) : [];
+
+  return buildCollectionContext(
+    resolved.deck.id,
+    resolved.entries.map((entry) => entry.card.oracleId),
+    inventory,
+    ownedCards,
+    allDecks,
+  );
+}
+
+function stripSuggestions(problems: Problem[]): Problem[] {
+  return problems.map(({ suggestions: _suggestions, ...problem }) => problem);
 }
 
 async function resolveOnly(deck: DeckWithCards): Promise<ResolvedDeck> {

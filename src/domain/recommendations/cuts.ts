@@ -10,6 +10,10 @@ import type {
 import { CARD_ROLE_LABELS } from "@/domain/types";
 import { clamp } from "@/domain/analysis/health-config";
 import { STAPLES } from "@/domain/recommendations/staples";
+import {
+  inventoryCutAdjustment,
+  type CollectionContext,
+} from "@/domain/recommendations/collection-aware";
 
 /**
  * Ranks cut candidates (PRD §10).
@@ -53,15 +57,19 @@ export function suggestCuts(
   synergy: SynergySummary,
   problems: Problem[],
   limit = 12,
-  options: { minScore?: number; relaxFilters?: boolean } = {},
+  options: { minScore?: number; relaxFilters?: boolean; collection?: CollectionContext | null } = {},
 ): CutCandidate[] {
   const minScore = options.minScore ?? MIN_CUT_SCORE;
   const relax = options.relaxFilters === true;
+  const collection = options.collection ?? null;
   const nonland = deck.entries.filter((e) => !e.roles.includes("LAND") && !e.isCommander);
   const roleTotals = countSoleRoles(nonland);
   const scarceRoles = findScarceRoles(stats, problems);
 
   const candidates = nonland.map((entry) => {
+    const inventory = collection
+      ? inventoryCutAdjustment(entry.card.oracleId, entry.quantity, collection)
+      : null;
     const components = [
       lowSynergy(entry, synergy),
       roleRedundancy(entry, roleTotals),
@@ -71,6 +79,7 @@ export function suggestCuts(
       commanderSynergy(entry, deck),
       stapleShield(entry),
       utilityShield(entry, roleTotals),
+      inventory,
     ].filter((c): c is ScoreComponent => c !== null);
 
     const raw = components.reduce((sum, c) => sum + c.points, 0);
@@ -78,6 +87,8 @@ export function suggestCuts(
       .filter((c) => c.points > 0)
       .sort((a, b) => b.points - a.points)
       .map((c) => c.reason);
+
+    const elsewhere = collection?.otherDecks.get(entry.card.oracleId);
 
     return {
       oracleId: entry.card.oracleId,
@@ -91,6 +102,8 @@ export function suggestCuts(
             : [],
       imageUri: entry.card.imageUri,
       prices: entry.card.prices,
+      ownedCopies: collection ? (collection.ownedQty.get(entry.card.oracleId) ?? 0) : undefined,
+      otherDeckNames: elsewhere?.names,
     };
   });
 

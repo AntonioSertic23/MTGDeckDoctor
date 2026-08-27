@@ -166,5 +166,25 @@ export function useInventory() {
     void refresh();
   }, [refresh]);
 
-  return { inventory, cards, loading, error, refresh };
+  const setQuantity = useCallback(
+    async (oracleId: string, quantity: number) => {
+      setInventory((prev) => {
+        if (quantity <= 0) return prev.filter((item) => item.oracleId !== oracleId);
+        const exists = prev.some((item) => item.oracleId === oracleId);
+        if (!exists) return [...prev, { oracleId, quantity }];
+        return prev.map((item) =>
+          item.oracleId === oracleId ? { oracleId, quantity } : item,
+        );
+      });
+      try {
+        await getRepository().setInventoryQuantity(oracleId, quantity);
+      } catch (err) {
+        await refresh();
+        throw err;
+      }
+    },
+    [refresh],
+  );
+
+  return { inventory, cards, loading, error, refresh, setQuantity };
 }

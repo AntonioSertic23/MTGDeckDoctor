@@ -1,5 +1,6 @@
 import type { AdditionCandidate, DeckHealth, HealthCategory, HealthCategoryId } from "@/domain/types";
 import { CardArt } from "@/components/card-art";
+import { CollectionBadges } from "@/components/recommendation-lists";
 import {
   HEALTH_STATUS_BAR,
   HEALTH_STATUS_LABEL,
@@ -113,6 +114,11 @@ function CategoryRow({
                 <span className="line-clamp-2 text-[10px] font-medium leading-tight text-ink">
                   {card.name}
                 </span>
+                <CollectionBadges
+                  ownedCopies={card.ownedCopies}
+                  otherDeckNames={card.otherDeckNames}
+                  fromCollection={card.fromCollection}
+                />
               </li>
             ))}
           </ul>

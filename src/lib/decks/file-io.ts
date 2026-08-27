@@ -1,4 +1,6 @@
 import type { Card, Deck, DeckCard, DeckWithCards, InventoryItem } from "@/domain/types";
+import { classifyCard } from "@/domain/cards/classifier";
+import { formatArchidektDecklist } from "@/domain/export/archidekt-text";
 import { normalizeDeck } from "@/domain/decks/normalize";
 import { getRepository } from "@/lib/storage";
 
@@ -55,6 +57,50 @@ export async function exportDecksToFile(deckIds?: string[]): Promise<void> {
       ? `mtg-deck-doctor-${slug(payload.decks[0]?.deck.name ?? "deck")}-${stamp}.json`
       : `mtg-deck-doctor-backup-${stamp}.json`;
   downloadJson(name, payload);
+}
+
+/** Copy one deck as Archidekt plain text to the clipboard (for paste-import). */
+export async function copyDeckToArchidektClipboard(deckId: string): Promise<void> {
+  const repo = getRepository();
+  const deck = await repo.getDeck(deckId);
+  if (!deck) throw new Error("Deck not found.");
+
+  const oracleIds = [
+    ...deck.cards.map((c) => c.oracleId),
+    ...deck.deck.commanderOracleIds,
+  ];
+  const cards = await repo.getCards([...new Set(oracleIds)]);
+  const byId = new Map(cards.map((c) => [c.oracleId, c]));
+
+  const entries = deck.cards
+    .map((deckCard) => {
+      const card = byId.get(deckCard.oracleId);
+      if (!card) return null;
+      return {
+        card,
+        quantity: deckCard.quantity,
+        roles: classifyCard(card),
+        isCommander: deck.deck.commanderOracleIds.includes(deckCard.oracleId),
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+
+  // Commander might be missing from deck_cards in odd states — still emit it.
+  for (const commanderId of deck.deck.commanderOracleIds) {
+    if (entries.some((e) => e.card.oracleId === commanderId)) continue;
+    const card = byId.get(commanderId);
+    if (card) {
+      entries.unshift({
+        card,
+        quantity: 1,
+        roles: classifyCard(card),
+        isCommander: true,
+      });
+    }
+  }
+
+  const text = formatArchidektDecklist(entries, deck.deck.commanderOracleIds);
+  await navigator.clipboard.writeText(text);
 }
 
 /** Import decks/cards from a previously exported JSON file into active storage. */

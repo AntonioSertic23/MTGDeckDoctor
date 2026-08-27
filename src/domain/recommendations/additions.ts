@@ -15,6 +15,13 @@ import {
   type HealthThresholds,
   recommendedRamp,
 } from "@/domain/analysis/health-config";
+import {
+  collectionRolesAndThemes,
+  findOwnedCard,
+  formatDeckNames,
+  isCollectionAddCandidate,
+  type CollectionContext,
+} from "@/domain/recommendations/collection-aware";
 
 /**
  * Recommends cards based on what the deck lacks (PRD §11).
@@ -31,18 +38,24 @@ export function suggestAdditions(
   synergy: SynergySummary,
   thresholds: HealthThresholds = DEFAULT_THRESHOLDS,
   limit = 12,
+  collection?: CollectionContext | null,
 ): AdditionCandidate[] {
   const identity = new Set(stats.colorIdentity);
-  const owned = new Set(deck.entries.map((e) => normalizeName(e.card.name)));
+  const inDeck = new Set(deck.entries.map((e) => normalizeName(e.card.name)));
   const gaps = findRoleGaps(stats, thresholds);
   const deckThemes = new Map(synergy.themes.map((t) => [t.id, t.count]));
 
-  const candidates = STAPLES.filter((staple) => isLegalInIdentity(staple, identity))
-    .filter((staple) => !owned.has(normalizeName(staple.name)))
+  const staples = STAPLES.filter((staple) => isLegalInIdentity(staple, identity))
+    .filter((staple) => !inDeck.has(normalizeName(staple.name)))
     .map((staple) => score(staple, gaps, deckThemes))
-    .filter((candidate) => candidate.score > 0);
+    .filter((candidate) => candidate.score > 0)
+    .map((candidate) => applyOwnership(candidate, collection));
 
-  return dropRedundant(candidates).slice(0, limit);
+  const fromCollection = collection
+    ? ownedGapFillers(deck, identity, gaps, deckThemes, collection)
+    : [];
+
+  return dropRedundant(mergeByName(fromCollection, staples)).slice(0, limit);
 }
 
 /**
@@ -56,11 +69,12 @@ export function suggestAdditionsForRoles(
   roles: CardRole[],
   limit = 4,
   thresholds: HealthThresholds = DEFAULT_THRESHOLDS,
+  collection?: CollectionContext | null,
 ): AdditionCandidate[] {
   if (roles.length === 0 || limit <= 0) return [];
 
   const identity = new Set(stats.colorIdentity);
-  const owned = new Set(deck.entries.map((e) => normalizeName(e.card.name)));
+  const inDeck = new Set(deck.entries.map((e) => normalizeName(e.card.name)));
   const gaps = findRoleGaps(stats, thresholds);
   const roleSet = new Set(roles);
   const deckThemes = new Map(synergy.themes.map((t) => [t.id, t.count]));
@@ -70,13 +84,21 @@ export function suggestAdditionsForRoles(
     if (!gaps.has(role)) gaps.set(role, 1);
   }
 
-  return STAPLES.filter((staple) => staple.roles.some((role) => roleSet.has(role)))
+  const staples = STAPLES.filter((staple) => staple.roles.some((role) => roleSet.has(role)))
     .filter((staple) => isLegalInIdentity(staple, identity))
-    .filter((staple) => !owned.has(normalizeName(staple.name)))
+    .filter((staple) => !inDeck.has(normalizeName(staple.name)))
     .map((staple) => score(staple, gaps, deckThemes, { lenientTheme: true }))
     .filter((candidate) => candidate.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
+    .map((candidate) => applyOwnership(candidate, collection));
+
+  const fromCollection = collection
+    ? ownedGapFillers(deck, identity, gaps, deckThemes, collection, {
+        lenientTheme: true,
+        roleFilter: roleSet,
+      })
+    : [];
+
+  return mergeByName(fromCollection, staples).sort(compareAdditions).slice(0, limit);
 }
 
 interface RoleGap {
@@ -206,18 +228,132 @@ function score(
   };
 }
 
+function ownedGapFillers(
+  deck: ResolvedDeck,
+  identity: Set<Color>,
+  gaps: Map<CardRole, number>,
+  deckThemes: Map<ThemeId, number>,
+  collection: CollectionContext,
+  options: ScoreOptions & { roleFilter?: Set<CardRole> } = {},
+): AdditionCandidate[] {
+  const inDeck = collection.currentDeckOracleIds;
+  const seen = new Set<string>();
+  const results: AdditionCandidate[] = [];
+
+  for (const card of collection.ownedCards) {
+    if (inDeck.has(card.oracleId) || seen.has(card.oracleId)) continue;
+    if (!card.colorIdentity.every((c) => identity.has(c))) continue;
+
+    const { roles, themes } = collectionRolesAndThemes(card);
+    if (options.roleFilter && !roles.some((role) => options.roleFilter!.has(role))) continue;
+    if (!isCollectionAddCandidate(card, roles)) continue;
+
+    const staple: StapleEntry = {
+      name: card.name,
+      colorIdentity: card.colorIdentity.join(""),
+      roles,
+      manaValue: card.manaValue,
+      themes,
+      note: "From your collection",
+    };
+    const candidate = score(staple, gaps, deckThemes, options);
+    if (candidate.score <= 0) continue;
+
+    seen.add(card.oracleId);
+    results.push(
+      applyOwnership(
+        {
+          ...candidate,
+          oracleId: card.oracleId,
+          imageUri: card.imageUri,
+          prices: card.prices,
+          fromCollection: true,
+        },
+        collection,
+      ),
+    );
+  }
+
+  return results;
+}
+
+function applyOwnership(
+  candidate: AdditionCandidate,
+  collection?: CollectionContext | null,
+): AdditionCandidate {
+  if (!collection || collection.ownedCards.length === 0) return candidate;
+
+  const card =
+    (candidate.oracleId
+      ? collection.ownedCards.find((c) => c.oracleId === candidate.oracleId)
+      : undefined) ?? findOwnedCard(candidate.name, collection);
+  if (!card) return candidate;
+
+  const qty = collection.ownedQty.get(card.oracleId) ?? 0;
+  if (qty <= 0) return candidate;
+
+  const elsewhere = collection.otherDecks.get(card.oracleId);
+  const otherNames = elsewhere?.names ?? [];
+  const reasons = [...candidate.reasons];
+  let extra = 24;
+  if (otherNames.length > 0) {
+    extra = 12;
+    reasons.unshift(`You own this — also listed in ${formatDeckNames(otherNames)}`);
+  } else {
+    reasons.unshift(`You own ${qty} ${qty === 1 ? "copy" : "copies"}`);
+  }
+
+  return {
+    ...candidate,
+    oracleId: candidate.oracleId ?? card.oracleId,
+    imageUri: candidate.imageUri ?? card.imageUri,
+    prices: candidate.prices ?? card.prices,
+    ownedCopies: qty,
+    otherDeckNames: otherNames,
+    score: candidate.score + extra,
+    reasons,
+  };
+}
+
+function mergeByName(
+  owned: AdditionCandidate[],
+  staples: AdditionCandidate[],
+): AdditionCandidate[] {
+  const byName = new Map<string, AdditionCandidate>();
+  for (const candidate of [...staples, ...owned]) {
+    const key = normalizeName(candidate.name);
+    const existing = byName.get(key);
+    if (!existing || compareAdditions(candidate, existing) < 0) {
+      byName.set(key, {
+        ...candidate,
+        fromCollection: candidate.fromCollection || existing?.fromCollection,
+      });
+    }
+  }
+  return [...byName.values()];
+}
+
+function compareAdditions(a: AdditionCandidate, b: AdditionCandidate): number {
+  const ao = (a.ownedCopies ?? 0) > 0 ? 1 : 0;
+  const bo = (b.ownedCopies ?? 0) > 0 ? 1 : 0;
+  if (ao !== bo) return bo - ao;
+  return b.score - a.score;
+}
+
 /**
  * Keeps the list varied: at most two suggestions whose primary role is the
  * same, so a deck missing ramp does not get twelve mana rocks.
+ * Owned cards get a slightly higher cap so the collection can actually fill gaps.
  */
 function dropRedundant(candidates: AdditionCandidate[]): AdditionCandidate[] {
   const perRole = new Map<CardRole, number>();
   const kept: AdditionCandidate[] = [];
 
-  for (const candidate of [...candidates].sort((a, b) => b.score - a.score)) {
+  for (const candidate of [...candidates].sort(compareAdditions)) {
     const primary = candidate.roles[0];
     const used = perRole.get(primary) ?? 0;
-    if (used >= 2) continue;
+    const cap = (candidate.ownedCopies ?? 0) > 0 ? 3 : 2;
+    if (used >= cap) continue;
     perRole.set(primary, used + 1);
     kept.push(candidate);
   }

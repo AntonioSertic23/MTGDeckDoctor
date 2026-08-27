@@ -11,6 +11,7 @@ import { suggestAdditions, suggestAdditionsForRoles } from "@/domain/recommendat
 import { suggestCuts } from "@/domain/recommendations/cuts";
 import type { HealthThresholds } from "@/domain/analysis/health-config";
 import { DEFAULT_THRESHOLDS } from "@/domain/analysis/health-config";
+import type { CollectionContext } from "@/domain/recommendations/collection-aware";
 
 /** Problem type → roles we should recommend staples for. */
 export const PROBLEM_SUGGESTION_ROLES: Record<string, CardRole[]> = {
@@ -46,13 +47,14 @@ export function enrichProblemsWithSuggestions(
   stats: DeckStatistics,
   synergy: SynergySummary,
   thresholds: HealthThresholds = DEFAULT_THRESHOLDS,
+  collection?: CollectionContext | null,
 ): Problem[] {
   return problems.map((problem) => {
     if (problem.type === "TOO_MANY_CARDS") {
-      return enrichTooManyCards(problem, deck, stats, synergy, problems);
+      return enrichTooManyCards(problem, deck, stats, synergy, problems, collection);
     }
     if (problem.type === "TOO_FEW_CARDS") {
-      return enrichTooFewCards(problem, deck, stats, synergy, thresholds);
+      return enrichTooFewCards(problem, deck, stats, synergy, thresholds, collection);
     }
 
     const roles = PROBLEM_SUGGESTION_ROLES[problem.type];
@@ -65,6 +67,7 @@ export function enrichProblemsWithSuggestions(
       roles,
       SUGGESTIONS_PER_PROBLEM,
       thresholds,
+      collection,
     );
     if (suggestions.length === 0) return problem;
 
@@ -87,6 +90,7 @@ function enrichTooManyCards(
   stats: DeckStatistics,
   synergy: SynergySummary,
   problems: Problem[],
+  collection?: CollectionContext | null,
 ): Problem {
   const excess = Number(problem.evidence.excess) || Math.max(0, stats.totalCards - 100);
   if (excess <= 0) return problem;
@@ -94,6 +98,7 @@ function enrichTooManyCards(
   const cuts = suggestCuts(deck, stats, synergy, problems, excess, {
     minScore: 0,
     relaxFilters: true,
+    collection,
   });
   let names = cuts.map((c) => c.name);
 
@@ -129,11 +134,12 @@ function enrichTooFewCards(
   stats: DeckStatistics,
   synergy: SynergySummary,
   thresholds: HealthThresholds,
+  collection?: CollectionContext | null,
 ): Problem {
   const missing = Number(problem.evidence.missing) || Math.max(0, 100 - stats.totalCards);
   if (missing <= 0) return problem;
 
-  const suggestions = suggestAdditions(deck, stats, synergy, thresholds, missing);
+  const suggestions = suggestAdditions(deck, stats, synergy, thresholds, missing, collection);
   if (suggestions.length === 0) return problem;
 
   return {
@@ -153,6 +159,7 @@ export function suggestionsForHealthCategories(
   synergy: SynergySummary,
   categoryScores: { id: HealthCategoryId; score: number }[],
   thresholds: HealthThresholds = DEFAULT_THRESHOLDS,
+  collection?: CollectionContext | null,
 ): Partial<Record<HealthCategoryId, AdditionCandidate[]>> {
   const result: Partial<Record<HealthCategoryId, AdditionCandidate[]>> = {};
 
@@ -167,6 +174,7 @@ export function suggestionsForHealthCategories(
       roles,
       SUGGESTIONS_PER_PROBLEM,
       thresholds,
+      collection,
     );
     if (suggestions.length > 0) result[category.id] = suggestions;
   }

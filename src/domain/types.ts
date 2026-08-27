@@ -216,7 +216,7 @@ export interface Problem {
   evidence: Record<string, number | string>;
   affectedCards: string[];
   suggestedFix?: string;
-  /** Concrete cards that would address this problem (from the staple pool). */
+  /** Concrete cards that would address this problem (staples + collection). */
   suggestions?: AdditionCandidate[];
 }
 
@@ -283,6 +283,10 @@ export interface CutCandidate {
   reasons: string[];
   imageUri?: string | null;
   prices?: CardPrices | null;
+  /** Copies in the user's collection (0 / omitted = unknown). */
+  ownedCopies?: number;
+  /** Other decks that also list this card. */
+  otherDeckNames?: string[];
 }
 
 export interface AdditionCandidate {
@@ -294,6 +298,11 @@ export interface AdditionCandidate {
   reasons: string[];
   imageUri?: string | null;
   prices?: CardPrices | null;
+  oracleId?: string;
+  ownedCopies?: number;
+  otherDeckNames?: string[];
+  /** True when this pick came from the user's collection rather than the staple list. */
+  fromCollection?: boolean;
 }
 
 export interface DeckProfile {

@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
-import { Library, Minus, Plus, Upload } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { Library, Minus, Plus, Upload, WandSparkles } from "lucide-react";
 import { CardArt } from "@/components/card-art";
-import { Button, EmptyState, PageHeader, Panel, StatChip } from "@/components/ui";
+import { Button, buttonClassName, EmptyState, PageHeader, Panel, StatChip } from "@/components/ui";
 import { classifyCard } from "@/domain/cards/classifier";
 import {
   CARD_ROLE_LABELS,
@@ -18,8 +19,7 @@ import {
 } from "@/lib/collection/import-collection";
 import { usePersistedState } from "@/lib/hooks/use-persisted-state";
 import { useInventory } from "@/lib/hooks/use-repository";
-import { getRepository } from "@/lib/storage";
-import { cardEurPrice, cn, formatCardPrices } from "@/lib/utils";
+import { cardEurPrice, formatCardPrices } from "@/lib/utils";
 
 type CollectionSort = "name" | "quantity" | "price" | "manaValue";
 type ColorFilter = "all" | Color | "C";
@@ -140,7 +140,7 @@ interface CollectionRow {
 }
 
 export default function CollectionPage() {
-  const { inventory, cards, loading, error, refresh } = useInventory();
+  const { inventory, cards, loading, error, refresh, setQuantity } = useInventory();
   const fileRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<CardRole | "all">("all");
@@ -150,7 +150,6 @@ export default function CollectionPage() {
   const [importing, setImporting] = useState(false);
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [lastImport, setLastImport] = useState<CollectionImportResult | null>(null);
-  const [pending, startTransition] = useTransition();
 
   const rows = useMemo<CollectionRow[]>(() => {
     return inventory.map((item) => {
@@ -203,10 +202,11 @@ export default function CollectionPage() {
   );
 
   async function setOwned(oracleId: string, quantity: number) {
-    await getRepository().setInventoryQuantity(oracleId, quantity);
-    startTransition(() => {
-      void refresh();
-    });
+    try {
+      await setQuantity(oracleId, quantity);
+    } catch {
+      // Hook rolls inventory back via refresh; surface nothing extra for a tap.
+    }
   }
 
   async function onFileSelected(file: File | null) {
@@ -248,6 +248,10 @@ export default function CollectionPage() {
               className="sr-only"
               onChange={(e) => void onFileSelected(e.target.files?.[0] ?? null)}
             />
+            <Link href="/build" className={buttonClassName("secondary")}>
+              <WandSparkles className="h-4 w-4" aria-hidden />
+              Build deck
+            </Link>
             <Button
               type="button"
               disabled={importing}
@@ -374,69 +378,23 @@ export default function CollectionPage() {
             </div>
           </Panel>
 
-          <Panel className={cn(pending && "opacity-80")}>
+          <div>
             {filtered.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted">No cards match these filters.</p>
+              <Panel>
+                <p className="py-8 text-center text-sm text-muted">No cards match these filters.</p>
+              </Panel>
             ) : (
-              <ul className="divide-y divide-[var(--border)]">
-                {filtered.map((row) => {
-                  const name = row.card?.name ?? "Unknown card";
-                  const price = formatCardPrices(row.card?.prices);
-                  const roleLabels = row.roles.slice(0, 3).map((r) => CARD_ROLE_LABELS[r]);
-                  return (
-                    <li
-                      key={row.item.oracleId}
-                      className="flex gap-3 py-3 first:pt-0 last:pb-0 sm:items-center"
-                    >
-                      <CardArt
-                        name={name}
-                        imageUri={row.card?.imageUri}
-                        prices={row.card?.prices}
-                        size="sm"
-                        className="shrink-0"
-                      />
-                      <div className="min-w-0 flex-1 space-y-1">
-                        <div className="font-medium text-ink">{name}</div>
-                        <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-muted">
-                          {row.card?.manaCost ? <span>{row.card.manaCost}</span> : null}
-                          {row.card?.typeLine ? <span>{row.card.typeLine}</span> : null}
-                          {price ? <span>{price}</span> : null}
-                        </div>
-                        {roleLabels.length > 0 ? (
-                          <div className="text-[11px] text-ink-muted">{roleLabels.join(" · ")}</div>
-                        ) : null}
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1 self-center">
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          className="h-9 w-9 px-0"
-                          aria-label={`Decrease ${name}`}
-                          onClick={() =>
-                            void setOwned(row.item.oracleId, Math.max(0, row.item.quantity - 1))
-                          }
-                        >
-                          <Minus className="h-4 w-4" aria-hidden />
-                        </Button>
-                        <span className="w-8 text-center text-sm font-semibold tabular-nums text-ink">
-                          {row.item.quantity}
-                        </span>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          className="h-9 w-9 px-0"
-                          aria-label={`Increase ${name}`}
-                          onClick={() => void setOwned(row.item.oracleId, row.item.quantity + 1)}
-                        >
-                          <Plus className="h-4 w-4" aria-hidden />
-                        </Button>
-                      </div>
-                    </li>
-                  );
-                })}
+              <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5">
+                {filtered.map((row) => (
+                  <CollectionCardTile
+                    key={row.item.oracleId}
+                    row={row}
+                    onQuantityChange={(quantity) => void setOwned(row.item.oracleId, quantity)}
+                  />
+                ))}
               </ul>
             )}
-          </Panel>
+          </div>
         </>
       )}
 
@@ -452,4 +410,72 @@ function compareName(a: CollectionRow, b: CollectionRow): number {
   const an = a.card?.name ?? a.item.oracleId;
   const bn = b.card?.name ?? b.item.oracleId;
   return an.localeCompare(bn, undefined, { sensitivity: "base" });
+}
+
+function CollectionCardTile({
+  row,
+  onQuantityChange,
+}: {
+  row: CollectionRow;
+  onQuantityChange: (quantity: number) => void;
+}) {
+  const name = row.card?.name ?? "Unknown card";
+  const price = formatCardPrices(row.card?.prices);
+  const roleLabel = row.roles[0] ? CARD_ROLE_LABELS[row.roles[0]] : null;
+
+  return (
+    <li className="min-w-0">
+      <div className="relative overflow-hidden rounded-xl shadow-md ring-1 ring-black/5 dark:ring-white/10">
+        <CardArt
+          name={name}
+          imageUri={row.card?.imageUri}
+          prices={row.card?.prices}
+          size="fill"
+          className="block w-full"
+        />
+        <span
+          className="pointer-events-none absolute right-1.5 top-1.5 z-10 rounded-md bg-black/80 px-1.5 py-0.5 text-xs font-semibold tabular-nums text-white shadow-sm"
+          aria-label={`Quantity ${row.item.quantity}`}
+        >
+          ×{row.item.quantity}
+        </span>
+      </div>
+
+      <div
+        className="mt-1.5 flex items-center justify-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--card)] p-1"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink transition hover:bg-black/5 dark:hover:bg-white/10"
+          aria-label={`Decrease ${name}`}
+          onClick={() => onQuantityChange(Math.max(0, row.item.quantity - 1))}
+        >
+          <Minus className="h-4 w-4" aria-hidden />
+        </button>
+        <span className="min-w-[1.5rem] text-center text-sm font-semibold tabular-nums text-ink">
+          {row.item.quantity}
+        </span>
+        <button
+          type="button"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink transition hover:bg-black/5 dark:hover:bg-white/10"
+          aria-label={`Increase ${name}`}
+          onClick={() => onQuantityChange(row.item.quantity + 1)}
+        >
+          <Plus className="h-4 w-4" aria-hidden />
+        </button>
+      </div>
+
+      <div className="mt-1.5 space-y-0.5 px-0.5">
+        <div className="truncate text-sm font-medium leading-snug text-ink" title={name}>
+          {name}
+        </div>
+        <div className="flex items-baseline justify-between gap-2 text-[11px] text-muted">
+          <span className="truncate">{row.card?.manaCost || "—"}</span>
+          {price ? <span className="shrink-0 tabular-nums">{price}</span> : null}
+        </div>
+        {roleLabel ? <div className="truncate text-[11px] text-ink-muted">{roleLabel}</div> : null}
+      </div>
+    </li>
+  );
 }

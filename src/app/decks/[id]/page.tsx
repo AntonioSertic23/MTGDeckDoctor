@@ -6,9 +6,11 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import type { LocalAnalysis } from "@/lib/decks/analyze-local";
 import { getCachedOrAnalyzeDeck } from "@/lib/decks/analyze-local";
 import { useDeck, useDecksWithCards } from "@/lib/hooks/use-repository";
+import { usePersistedState } from "@/lib/hooks/use-persisted-state";
 import { getRepository } from "@/lib/storage";
 import { buildSharedCardIndex, findSharedCards } from "@/domain/sharing/shared-cards";
-import type { Deck } from "@/domain/types";
+import type { Color, Deck, ResolvedDeckEntry } from "@/domain/types";
+import { CARD_ROLE_LABELS } from "@/domain/types";
 import { HealthMeter } from "@/components/health-meter";
 import { ProblemList, type CardVisual } from "@/components/problem-list";
 import { AdditionList, CutList } from "@/components/recommendation-lists";
@@ -16,8 +18,8 @@ import { SharedCardList } from "@/components/shared-card-list";
 import { Button, buttonClassName, PageHeader, Panel, StatChip } from "@/components/ui";
 import { CardArt } from "@/components/card-art";
 import { CommanderPanel } from "@/components/commander-panel";
-import { exportDecksToFile } from "@/lib/decks/file-io";
-import { cn, formatCardPrices } from "@/lib/utils";
+import { copyDeckToArchidektClipboard, exportDecksToFile } from "@/lib/decks/file-io";
+import { cardEurPrice, cn, formatCardPrices } from "@/lib/utils";
 
 const TABS = [
   { id: "overview", label: "Overview" },
@@ -32,6 +34,96 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
+type CardSort = "name" | "manaValue" | "type" | "color" | "price" | "quantity";
+
+const CARD_SORT_KEY = "mtg-deck-doctor:deck-cards-sort";
+
+const CARD_SORT_OPTIONS: { value: CardSort; label: string }[] = [
+  { value: "name", label: "Name" },
+  { value: "manaValue", label: "Mana value" },
+  { value: "type", label: "Type" },
+  { value: "color", label: "Color" },
+  { value: "price", label: "Price (EUR)" },
+  { value: "quantity", label: "Quantity" },
+];
+
+const COLOR_RANK: Record<Color, number> = { W: 0, U: 1, B: 2, R: 3, G: 4 };
+
+const TYPE_RANK = [
+  "creature",
+  "planeswalker",
+  "instant",
+  "sorcery",
+  "artifact",
+  "enchantment",
+  "battle",
+  "land",
+] as const;
+
+function isCardSort(value: string): value is CardSort {
+  return CARD_SORT_OPTIONS.some((opt) => opt.value === value);
+}
+
+function primaryType(typeLine: string): string {
+  const lower = typeLine.toLowerCase();
+  for (const type of TYPE_RANK) {
+    if (lower.includes(type)) return type;
+  }
+  return "other";
+}
+
+function colorSortKey(colors: Color[]): string {
+  if (colors.length === 0) return "99";
+  return `${String(colors.length).padStart(2, "0")}-${[...colors]
+    .sort((a, b) => COLOR_RANK[a] - COLOR_RANK[b])
+    .join("")}`;
+}
+
+function compareName(a: ResolvedDeckEntry, b: ResolvedDeckEntry): number {
+  return a.card.name.localeCompare(b.card.name, undefined, { sensitivity: "base" });
+}
+
+function sortDeckEntries(entries: ResolvedDeckEntry[], sort: CardSort): ResolvedDeckEntry[] {
+  const copy = [...entries];
+  copy.sort((a, b) => {
+    // Commanders stay at the top regardless of sort.
+    if (a.isCommander !== b.isCommander) return a.isCommander ? -1 : 1;
+
+    switch (sort) {
+      case "manaValue": {
+        const byMv = a.card.manaValue - b.card.manaValue;
+        return byMv !== 0 ? byMv : compareName(a, b);
+      }
+      case "type": {
+        const byType = primaryType(a.card.typeLine).localeCompare(primaryType(b.card.typeLine));
+        return byType !== 0 ? byType : compareName(a, b);
+      }
+      case "color": {
+        const byColor = colorSortKey(a.card.colorIdentity).localeCompare(
+          colorSortKey(b.card.colorIdentity),
+        );
+        return byColor !== 0 ? byColor : compareName(a, b);
+      }
+      case "price": {
+        const pa = cardEurPrice(a.card) ?? -1;
+        const pb = cardEurPrice(b.card) ?? -1;
+        return pb - pa || compareName(a, b);
+      }
+      case "quantity": {
+        const byQty = b.quantity - a.quantity;
+        return byQty !== 0 ? byQty : compareName(a, b);
+      }
+      case "name":
+      default:
+        return compareName(a, b);
+    }
+  });
+  return copy;
+}
+
+const selectClassName =
+  "w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2.5 text-sm outline-none ring-accent focus:ring-2";
+
 export default function DeckDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -41,8 +133,10 @@ export default function DeckDetailPage() {
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>("overview");
   const [notesDraft, setNotesDraft] = useState("");
+  const [cardSort, setCardSort] = usePersistedState(CARD_SORT_KEY, "name", isCardSort);
   const [deleting, startDelete] = useTransition();
   const [busy, startBusy] = useTransition();
+  const [archidektCopied, setArchidektCopied] = useState(false);
 
   useEffect(() => {
     setNotesDraft(deck?.deck.description ?? "");
@@ -75,6 +169,11 @@ export default function DeckDetailPage() {
     const usage = buildSharedCardIndex(decks, cards, inventory);
     return findSharedCards(usage).filter((u) => u.deckIds.includes(deck.deck.id));
   }, [deck, decks, cards, inventory]);
+
+  const sortedCards = useMemo(() => {
+    if (!analysis) return [];
+    return sortDeckEntries(analysis.resolved.entries, cardSort);
+  }, [analysis, cardSort]);
 
   const artByName = useMemo(() => {
     const map = new Map<string, CardVisual>();
@@ -122,10 +221,23 @@ export default function DeckDetailPage() {
     });
   }
 
-  function exportDeck() {
+  function exportDeckJson() {
     if (!deck) return;
     startBusy(async () => {
       await exportDecksToFile([deck.deck.id]);
+    });
+  }
+
+  function copyArchidekt() {
+    if (!deck) return;
+    startBusy(async () => {
+      try {
+        await copyDeckToArchidektClipboard(deck.deck.id);
+        setArchidektCopied(true);
+        window.setTimeout(() => setArchidektCopied(false), 2000);
+      } catch (err) {
+        setAnalyzeError(err instanceof Error ? err.message : "Could not copy decklist.");
+      }
     });
   }
 
@@ -209,7 +321,10 @@ export default function DeckDetailPage() {
             <Button variant="secondary" onClick={renameDeck} disabled={deleting || busy}>
               Rename
             </Button>
-            <Button variant="secondary" onClick={exportDeck} disabled={deleting || busy}>
+            <Button variant="secondary" onClick={copyArchidekt} disabled={deleting || busy}>
+              {archidektCopied ? "Copied!" : "Copy for Archidekt"}
+            </Button>
+            <Button variant="secondary" onClick={exportDeckJson} disabled={deleting || busy}>
               Export JSON
             </Button>
             <Button
@@ -380,7 +495,7 @@ export default function DeckDetailPage() {
                 Suggested additions
               </h2>
               <p className="mb-4 text-sm text-muted">
-                Ranked from role gaps and theme fit inside a curated staple pool.
+                Ranked from role gaps and theme fit. Cards you already own are listed first.
               </p>
               <AdditionList additions={analysis.additions} />
             </Panel>
@@ -417,16 +532,32 @@ export default function DeckDetailPage() {
 
           {tab === "cards" ? (
             <Panel>
-              <h2 className="mb-1 font-[family-name:var(--font-display)] text-xl font-semibold">
-                Cards
-              </h2>
-              <p className="mb-4 text-sm text-muted">
-                {analysis.resolved.entries.length} unique · {stats?.totalCards ?? "—"} total
-              </p>
+              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold">
+                    Cards
+                  </h2>
+                  <p className="mt-1 text-sm text-muted">
+                    {analysis.resolved.entries.length} unique · {stats?.totalCards ?? "—"} total
+                  </p>
+                </div>
+                <label className="block w-full space-y-1.5 sm:w-44">
+                  <span className="text-xs font-medium text-muted">Sort</span>
+                  <select
+                    className={selectClassName}
+                    value={cardSort}
+                    onChange={(e) => setCardSort(e.target.value as CardSort)}
+                  >
+                    {CARD_SORT_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
               <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {[...analysis.resolved.entries]
-                  .sort((a, b) => a.card.name.localeCompare(b.card.name))
-                  .map((entry) => (
+                {sortedCards.map((entry) => (
                     <li
                       key={entry.card.oracleId}
                       className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] p-3 sm:flex-row"
@@ -451,7 +582,10 @@ export default function DeckDetailPage() {
                         </p>
                         <p className="mt-1 text-xs text-muted">{entry.card.typeLine}</p>
                         <p className="mt-1 text-xs text-muted">
-                          {entry.roles.slice(0, 3).join(" · ") || "—"}
+                          {entry.roles
+                            .slice(0, 3)
+                            .map((role) => CARD_ROLE_LABELS[role])
+                            .join(" · ") || "—"}
                         </p>
                         <p className="mt-2 text-sm tabular-nums text-ink-muted">
                           {entry.card.manaCost ?? "—"}

@@ -1,5 +1,6 @@
 import type { AdditionCandidate, CardPrices, Problem, Severity } from "@/domain/types";
 import { CardArt } from "@/components/card-art";
+import { CollectionBadges } from "@/components/recommendation-lists";
 import { cn } from "@/lib/utils";
 
 export type CardVisual = {
@@ -105,9 +106,11 @@ function SuggestionStrip({ suggestions }: { suggestions: AdditionCandidate[] }) 
             <span className="line-clamp-2 text-[11px] font-medium leading-tight text-ink">
               {card.name}
             </span>
-            <span className="line-clamp-2 text-[10px] leading-snug text-muted">
-              {card.reasons[card.reasons.length - 1] ?? card.reasons[0]}
-            </span>
+            <CollectionBadges
+              ownedCopies={card.ownedCopies}
+              otherDeckNames={card.otherDeckNames}
+              fromCollection={card.fromCollection}
+            />
           </li>
         ))}
       </ul>
