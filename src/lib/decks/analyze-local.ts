@@ -230,7 +230,6 @@ async function resolveMetaByName(
 
   try {
     const { cards } = await resolveCardNames(names);
-    await getRepository().saveCards(cards);
     for (const card of cards) {
       const meta = { imageUri: card.imageUri, prices: card.prices };
       byName.set(normalize(card.name), meta);

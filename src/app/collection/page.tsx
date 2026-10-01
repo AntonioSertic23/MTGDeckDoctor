@@ -258,7 +258,7 @@ export default function CollectionPage() {
       <PageHeader
         eyebrow="Inventory"
         title="Collection"
-        description="Cards you own. Import an Archidekt CSV anytime — cards already here are skipped so you can re-upload the full export."
+        description="Cards you own. Re-upload an Archidekt CSV to add new cards and replace stored art with the printing in the file."
         actions={
           <>
             <input
@@ -305,8 +305,8 @@ export default function CollectionPage() {
           {importMessage ? <p className="text-ink">{importMessage}</p> : null}
           {lastImport ? (
             <p className="text-ink-muted">
-              Added {lastImport.added} · skipped {lastImport.skippedExisting} already owned ·{" "}
-              {lastImport.rowCount} rows in file
+              Updated {lastImport.printingsUpdated} printing(s) · added {lastImport.added} · skipped{" "}
+              {lastImport.skippedExisting} already owned · {lastImport.rowCount} rows in file
               {lastImport.unresolvedNames.length > 0
                 ? ` · ${lastImport.unresolvedNames.length} unresolved`
                 : ""}

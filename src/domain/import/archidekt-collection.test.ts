@@ -58,5 +58,15 @@ describe("desktop Archidekt export", () => {
     expect(tunnel).toMatchObject({ setCode: "pw26", collectorNumber: "9" });
     expect(muck).toMatchObject({ setCode: "plst", collectorNumber: "UDS-54" });
     expect(archive).toMatchObject({ setCode: "ori", collectorNumber: "221" });
+    expect(preferred.find((card) => card.name === "Heroes in a Half Shell")).toMatchObject({
+      setCode: "tmc",
+      collectorNumber: "6",
+      scryfallId: "ccc2a4e6-f505-4040-9d8a-c7b8e1a2b55e",
+    });
+    expect(preferred.find((card) => card.name === "Ezio Auditore da Firenze")).toMatchObject({
+      setCode: "acr",
+      collectorNumber: "25",
+      scryfallId: "dae9ee75-30b8-4e24-af8b-031c816d3221",
+    });
   });
 });

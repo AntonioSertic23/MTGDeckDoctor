@@ -1,6 +1,7 @@
 import { parseArchidektCollection, preferPrintings } from "@/domain/import/archidekt-collection";
 import type { Card } from "@/domain/types";
 import { resolveCardsByScryfallIds } from "@/lib/cards/client";
+import { invalidateStoredCardCaches } from "@/lib/hooks/use-repository";
 import { getRepository } from "@/lib/storage";
 
 export interface CollectionImportResult {
@@ -34,6 +35,7 @@ export async function importArchidektCollection(csv: string): Promise<Collection
   for (let index = 0; index < toSave.length; index += 100) {
     await repo.saveCards(toSave.slice(index, index + 100));
   }
+  invalidateStoredCardCaches();
 
   return {
     updated: toSave.length,

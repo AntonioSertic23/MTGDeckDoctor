@@ -28,6 +28,13 @@ function rememberShelf(next: ShelfCache) {
   shelfCache = next;
 }
 
+/** Drop in-memory card art so the next page load reads printings just saved. */
+export function invalidateStoredCardCaches(): void {
+  libraryCache = null;
+  shelfCache = null;
+  inventoryCache = null;
+}
+
 export function useDecks() {
   const [decks, setDecks] = useState<Deck[]>([]);
   const [loading, setLoading] = useState(true);

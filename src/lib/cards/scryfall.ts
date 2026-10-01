@@ -59,7 +59,6 @@ function rememberPrinting(card: Card): void {
   if (card.setCode && card.collectorNumber) {
     byPrinting.set(printingKey(card.setCode, card.collectorNumber), { card, storedAt: Date.now() });
   }
-  cacheCard(card);
 }
 
 function readPrintingEntry(entry: CacheEntry | undefined): Card | null {
@@ -144,15 +143,18 @@ async function fetchNamed(name: string): Promise<Card | null> {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   await throttle();
+  const hasBody = Boolean(init?.body);
   const response = await fetch(`${API}${path}`, {
     ...init,
     headers: {
       Accept: "application/json",
       "User-Agent": "MTGDeckDoctor/0.1 (https://github.com/mtg-deck-doctor)",
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(hasBody ? { "Content-Type": "application/json" } : {}),
       ...init?.headers,
     },
-    next: { revalidate: 60 * 60 * 24 },
+    // Collection lookups are POSTs. Caching them by URL would reuse another
+    // batch's printings and store the wrong edition.
+    ...(hasBody ? { cache: "no-store" as const } : { next: { revalidate: 60 * 60 * 24 } }),
   });
 
   if (!response.ok) {

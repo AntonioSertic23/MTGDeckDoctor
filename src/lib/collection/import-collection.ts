@@ -1,10 +1,12 @@
 import { parseArchidektCollectionCsv } from "@/domain/collection/archidekt-csv";
+import { parseArchidektCollection, preferPrintings } from "@/domain/import/archidekt-collection";
 import {
   filterResolvedAgainstOwned,
   mergeCollectionImport,
 } from "@/domain/collection/merge-inventory";
 import type { Card, InventoryItem } from "@/domain/types";
 import { resolveCardLookups, resolveCardsByOracleIds } from "@/lib/cards/client";
+import { importArchidektCollection } from "@/lib/decks/import-collection";
 import { getRepository } from "@/lib/storage";
 
 export interface CollectionImportProgress {
@@ -19,6 +21,8 @@ export interface CollectionImportResult {
   ignoredRows: number;
   rowCount: number;
   distinctInFile: number;
+  /** Stored card art replaced with the Scryfall printing from the file. */
+  printingsUpdated: number;
 }
 
 /**
@@ -37,6 +41,8 @@ export async function importArchidektCollectionCsv(
 
   report("parse", "Reading Archidekt export…");
   const parsed = parseArchidektCollectionCsv(csvText);
+  const owned = await refreshOwnedPrintings(csvText, report);
+  const ownedPrintings = owned.ids;
   if (parsed.entries.length === 0) {
     throw new Error("No cards found in that file. Export your collection from Archidekt as CSV.");
   }
@@ -53,9 +59,10 @@ export async function importArchidektCollectionCsv(
   const unresolvedNames: string[] = [];
   const cardsToCache: Card[] = [];
 
-  if (toAdd.length > 0) {
-    report("hydrate", `Loading ${toAdd.length} new card(s) from Scryfall…`);
-    const hydrated = await resolveCardsByOracleIds(toAdd.map((item) => item.oracleId));
+  const needOracleArt = toAdd.filter((item) => !ownedPrintings.has(item.oracleId));
+  if (needOracleArt.length > 0) {
+    report("hydrate", `Loading ${needOracleArt.length} new card(s) from Scryfall…`);
+    const hydrated = await resolveCardsByOracleIds(needOracleArt.map((item) => item.oracleId));
     cardsToCache.push(...hydrated);
     const found = new Set(hydrated.map((card) => card.oracleId));
     // Keep inventory rows even if art hydrate partially fails — name shows later.
@@ -70,7 +77,9 @@ export async function importArchidektCollectionCsv(
     const { cards, notFound } = await resolveCardLookups(
       merge.pendingNameResolve.map((entry) => ({ name: entry.name })),
     );
-    cardsToCache.push(...cards);
+    for (const card of cards) {
+      if (!ownedPrintings.has(card.oracleId)) cardsToCache.push(card);
+    }
     unresolvedNames.push(...notFound);
 
     const byName = new Map<string, Card>();
@@ -117,7 +126,25 @@ export async function importArchidektCollectionCsv(
     ignoredRows: parsed.ignoredRows.length,
     rowCount: parsed.rowCount,
     distinctInFile: parsed.entries.length,
+    printingsUpdated: owned.updated,
   };
+}
+
+/** Write the exact Scryfall printing from the CSV over whatever art is stored. */
+async function refreshOwnedPrintings(
+  csvText: string,
+  report: (phase: CollectionImportProgress["phase"], message: string) => void,
+): Promise<{ ids: Set<string>; updated: number }> {
+  let preferred;
+  try {
+    preferred = preferPrintings(parseArchidektCollection(csvText));
+  } catch {
+    return { ids: new Set(), updated: 0 };
+  }
+  if (preferred.length === 0) return { ids: new Set(), updated: 0 };
+  report("hydrate", `Updating ${preferred.length} owned printing(s)…`);
+  const result = await importArchidektCollection(csvText);
+  return { ids: new Set(preferred.map((card) => card.oracleId)), updated: result.updated };
 }
 
 function normalize(name: string): string {

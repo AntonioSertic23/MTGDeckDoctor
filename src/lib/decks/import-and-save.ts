@@ -168,8 +168,8 @@ async function persistChosenPrintings(chosen: Map<string, { card: Card; mode: Ma
   const existingIds = new Set(existing.map((card) => card.oracleId));
   const toSave: Card[] = [];
   for (const [oracleId, pick] of chosen) {
-    // Name-only resolves must not replace a printing already stored (collection or a previous list).
-    if (pick.mode === "name" && existingIds.has(oracleId)) continue;
+    // The collection export chooses the printing. A deck list must not replace it.
+    if (existingIds.has(oracleId)) continue;
     toSave.push(pick.card);
   }
   await getRepository().saveCards(toSave);
