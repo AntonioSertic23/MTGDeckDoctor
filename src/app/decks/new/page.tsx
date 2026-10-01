@@ -2,6 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, useTransition } from "react";
+import { importArchidektCollection } from "@/lib/decks/import-collection";
 import { importAndSaveDeck, replaceDeckList } from "@/lib/decks/import-and-save";
 import { importDecksFromFile } from "@/lib/decks/file-io";
 import { Button, PageHeader, Panel } from "@/components/ui";
@@ -24,6 +25,7 @@ function ImportDeckForm() {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
+  const [collectionMessage, setCollectionMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   function onSubmit(event: React.FormEvent) {
@@ -55,10 +57,36 @@ function ImportDeckForm() {
     setError(null);
     startTransition(async () => {
       try {
-        const { imported } = await importDecksFromFile(file);
-        router.push(imported === 1 ? "/decks" : "/");
+        await importDecksFromFile(file);
+        router.push("/decks");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Could not read that file.");
+      } finally {
+        event.target.value = "";
+      }
+    });
+  }
+
+  function onCollection(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setError(null);
+    setCollectionMessage("Updating printings…");
+    startTransition(async () => {
+      try {
+        const result = await importArchidektCollection(await file.text());
+        const missing =
+          result.missing.length > 0
+            ? ` Could not resolve ${result.missing.length}: ${result.missing.slice(0, 6).join(", ")}${result.missing.length > 6 ? "…" : ""}.`
+            : "";
+        const multi =
+          result.multiPrinting > 0
+            ? ` ${result.multiPrinting} cards you own in more than one printing use the copy you have the most of.`
+            : "";
+        setCollectionMessage(`Updated ${result.updated} card printings.${multi}${missing}`);
+      } catch (err) {
+        setCollectionMessage(null);
+        setError(err instanceof Error ? err.message : "Could not import that collection.");
       } finally {
         event.target.value = "";
       }
@@ -115,6 +143,39 @@ function ImportDeckForm() {
           </div>
         </form>
       </Panel>
+
+      {!replaceId ? (
+        <Panel className="mt-4 space-y-2">
+          <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold text-ink">
+            Archidekt collection
+          </h2>
+          <p className="text-sm text-ink-muted">
+            Upload a collection CSV export. Card art and prices switch to the exact printing
+            (Scryfall ID) from that file. Deck lists stay as they are.
+          </p>
+          <label className="inline-flex cursor-pointer">
+            <span className="sr-only">Choose Archidekt collection CSV</span>
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              onChange={onCollection}
+              disabled={pending}
+              className="text-sm"
+            />
+          </label>
+          {collectionMessage ? (
+            <p
+              className={
+                collectionMessage.startsWith("Updated")
+                  ? "text-sm text-emerald-700 dark:text-emerald-300"
+                  : "text-sm text-muted"
+              }
+            >
+              {collectionMessage}
+            </p>
+          ) : null}
+        </Panel>
+      ) : null}
 
       {!replaceId ? (
         <Panel className="mt-4 space-y-2">

@@ -1,6 +1,6 @@
+import { pickPrinting, type MatchMode } from "@/domain/import/match-printing";
 import { importDeck } from "@/domain/import/text-importer";
 import type { Card, Deck, DeckCard } from "@/domain/types";
-import { cleanCardName } from "@/lib/cards/clean-name";
 import { resolveCardLookups } from "@/lib/cards/client";
 import { getCachedOrAnalyzeDeck } from "@/lib/decks/analyze-local";
 import { getRepository } from "@/lib/storage";
@@ -35,33 +35,23 @@ export async function resolveDecklistText(text: string): Promise<ResolveDecklist
       collectorNumber: c.collectorNumber,
     })),
   );
-  await getRepository().saveCards(cards);
-
-  const byPrinting = new Map<string, Card>();
-  const byName = new Map<string, Card>();
-  for (const card of cards) {
-    byName.set(normalize(card.name), card);
-    const front = normalize(card.name.split("//")[0] ?? card.name);
-    if (!byName.has(front)) byName.set(front, card);
-    if (card.setCode) {
-      // Prefer the most recently resolved printing for this set when collector is unknown.
-      byPrinting.set(`${normalize(card.name)}|${card.setCode.toLowerCase()}`, card);
-    }
-  }
-
-  // Re-key printing matches using returned cards — Scryfall includes set + we requested collector.
-  // Match imported entries in order against resolved cards with same name+set when possible.
-  const unused = [...cards];
 
   const deckCards = new Map<string, DeckCard>();
+  const chosen = new Map<string, { card: Card; mode: MatchMode }>();
   const unresolved: string[] = [...notFound];
   const commanderOracleIds: string[] = [];
 
   for (const entry of imported.cards) {
-    const card = takeCard(entry.name, entry.setCode, unused) ?? matchCard(entry.name, entry.setCode, byName, byPrinting);
-    if (!card) {
+    const picked = pickPrinting(entry, cards);
+    if (!picked) {
       if (!unresolved.includes(entry.name)) unresolved.push(entry.name);
       continue;
+    }
+
+    const { card, mode } = picked;
+    const previous = chosen.get(card.oracleId);
+    if (!previous || modeRank(mode) > modeRank(previous.mode)) {
+      chosen.set(card.oracleId, { card, mode });
     }
 
     const existing = deckCards.get(card.oracleId);
@@ -72,6 +62,8 @@ export async function resolveDecklistText(text: string): Promise<ResolveDecklist
       commanderOracleIds.push(card.oracleId);
     }
   }
+
+  await persistChosenPrintings(chosen);
 
   if (deckCards.size === 0) {
     throw new Error(
@@ -84,7 +76,7 @@ export async function resolveDecklistText(text: string): Promise<ResolveDecklist
     commanderOracleIds,
     unresolved,
     ignoredLines: imported.ignoredLines,
-    resolvedCards: cards,
+    resolvedCards: [...chosen.values()].map((pick) => pick.card),
   };
 }
 
@@ -168,45 +160,19 @@ export async function replaceDeckList(
   };
 }
 
-function normalize(name: string): string {
-  return name.toLowerCase().replace(/\s+/g, " ").trim();
+function modeRank(mode: MatchMode): number {
+  return mode === "exact" ? 3 : mode === "set" ? 2 : 1;
 }
 
-function takeCard(name: string, setCode: string | undefined, pool: Card[]): Card | undefined {
-  const variants = nameVariants(name);
-  const index = pool.findIndex((card) => {
-    const nameOk = nameVariants(card.name).some((v) => variants.includes(v));
-    if (!nameOk) return false;
-    if (setCode && card.setCode.toLowerCase() !== setCode.toLowerCase()) return false;
-    return true;
-  });
-  if (index < 0) return undefined;
-  return pool.splice(index, 1)[0];
-}
-
-function matchCard(
-  name: string,
-  setCode: string | undefined,
-  byName: Map<string, Card>,
-  byPrinting: Map<string, Card>,
-): Card | undefined {
-  if (setCode) {
-    const keyed = byPrinting.get(`${normalize(name)}|${setCode.toLowerCase()}`);
-    if (keyed) return keyed;
-    const front = byPrinting.get(`${normalize(name.split("//")[0] ?? name)}|${setCode.toLowerCase()}`);
-    if (front) return front;
+async function persistChosenPrintings(chosen: Map<string, { card: Card; mode: MatchMode }>): Promise<void> {
+  if (chosen.size === 0) return;
+  const existing = await getRepository().getCards([...chosen.keys()]);
+  const existingIds = new Set(existing.map((card) => card.oracleId));
+  const toSave: Card[] = [];
+  for (const [oracleId, pick] of chosen) {
+    // Name-only resolves must not replace a printing already stored (collection or a previous list).
+    if (pick.mode === "name" && existingIds.has(oracleId)) continue;
+    toSave.push(pick.card);
   }
-  return byName.get(normalize(name)) ?? byName.get(normalize(name.split("//")[0] ?? name));
-}
-
-function nameVariants(name: string): string[] {
-  const variants = new Set<string>();
-  for (const candidate of [name, cleanCardName(name)]) {
-    if (!candidate.trim()) continue;
-    const normalized = normalize(candidate);
-    variants.add(normalized);
-    const front = normalized.split("//")[0]?.trim();
-    if (front) variants.add(front);
-  }
-  return [...variants];
+  await getRepository().saveCards(toSave);
 }

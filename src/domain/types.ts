@@ -100,6 +100,11 @@ export interface Card {
   toughness: string | null;
   imageUri: string | null;
   setCode: string;
+  /**
+   * Collector number for the resolved printing. Set when a card is fetched from
+   * Scryfall; storage may omit it. Used to keep Archidekt printings apart.
+   */
+  collectorNumber?: string;
   rarity: string;
   prices: CardPrices;
   legalities: Record<string, string>;

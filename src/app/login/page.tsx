@@ -17,7 +17,7 @@ export default function LoginPage() {
   const [pending, startTransition] = useTransition();
 
   useEffect(() => {
-    if (!loading && user) router.replace("/");
+    if (!loading && user) router.replace("/decks");
   }, [loading, user, router]);
 
   if (!configured) {
@@ -28,8 +28,8 @@ export default function LoginPage() {
           title="Sign in unavailable"
           description="Supabase is not configured on this deploy. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY in Netlify, then redeploy."
         />
-        <Link href="/" className="text-sm font-medium text-accent-strong hover:underline">
-          Back home
+        <Link href="/decks" className="text-sm font-medium text-accent-strong hover:underline">
+          Back to decks
         </Link>
       </div>
     );
@@ -47,7 +47,7 @@ export default function LoginPage() {
       try {
         if (mode === "signin") {
           await signIn(email, password);
-          router.replace("/");
+          router.replace("/decks");
           return;
         }
         const result = await signUp(email, password);
@@ -56,7 +56,7 @@ export default function LoginPage() {
           setMode("signin");
           return;
         }
-        router.replace("/");
+        router.replace("/decks");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Authentication failed.");
       }

@@ -150,37 +150,39 @@ export default function DecksPage() {
       ) : null}
 
       {decks.length > 0 ? (
-        <Panel className="space-y-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-            <label className="block w-full min-w-0 flex-1 space-y-1.5 sm:max-w-xs">
-              <span className="text-xs font-medium text-muted">Sort by</span>
-              <select
-                value={sort}
-                onChange={(e) => setSort(e.target.value as DeckSort)}
-                className={selectClassName}
-              >
-                {SORT_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block w-full min-w-0 flex-1 space-y-1.5 sm:max-w-xs">
-              <span className="text-xs font-medium text-muted">Show</span>
-              <select
-                value={readyFilter}
-                onChange={(e) => setReadyFilter(e.target.value as ReadyFilter)}
-                className={selectClassName}
-              >
-                {READY_FILTER_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
+        <div className="space-y-4">
+          <Panel>
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+              <label className="block w-full min-w-0 flex-1 space-y-1.5 sm:max-w-xs">
+                <span className="text-xs font-medium text-muted">Sort by</span>
+                <select
+                  value={sort}
+                  onChange={(e) => setSort(e.target.value as DeckSort)}
+                  className={selectClassName}
+                >
+                  {SORT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block w-full min-w-0 flex-1 space-y-1.5 sm:max-w-xs">
+                <span className="text-xs font-medium text-muted">Show</span>
+                <select
+                  value={readyFilter}
+                  onChange={(e) => setReadyFilter(e.target.value as ReadyFilter)}
+                  className={selectClassName}
+                >
+                  {READY_FILTER_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </Panel>
 
           {emptyAfterFilter ? (
             <p className="text-sm text-muted">
@@ -189,7 +191,7 @@ export default function DecksPage() {
           ) : (
             <DeckClinicList decks={visibleDecks} cards={cards} scores={scores} />
           )}
-        </Panel>
+        </div>
       ) : null}
     </div>
   );

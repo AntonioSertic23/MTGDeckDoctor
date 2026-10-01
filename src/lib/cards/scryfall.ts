@@ -26,7 +26,9 @@ interface CacheEntry {
 
 const byOracleId = new Map<string, CacheEntry>();
 const byName = new Map<string, string>();
-const byPrinting = new Map<string, string>();
+const byScryfallId = new Map<string, CacheEntry>();
+/** Printing cache stores the card itself. Oracle id is shared by every printing. */
+const byPrinting = new Map<string, CacheEntry>();
 
 let lastRequestAt = 0;
 
@@ -52,9 +54,18 @@ function cacheCard(card: Card): void {
   }
 }
 
-function cachePrinting(setCode: string, collectorNumber: string, card: Card): void {
-  byPrinting.set(printingKey(setCode, collectorNumber), card.oracleId);
+function rememberPrinting(card: Card): void {
+  byScryfallId.set(card.scryfallId, { card, storedAt: Date.now() });
+  if (card.setCode && card.collectorNumber) {
+    byPrinting.set(printingKey(card.setCode, card.collectorNumber), { card, storedAt: Date.now() });
+  }
   cacheCard(card);
+}
+
+function readPrintingEntry(entry: CacheEntry | undefined): Card | null {
+  if (!entry) return null;
+  if (Date.now() - entry.storedAt > CACHE_TTL_MS) return null;
+  return entry.card;
 }
 
 function readCache(oracleId: string): Card | null {
@@ -73,8 +84,11 @@ function readCacheByName(name: string): Card | null {
 }
 
 function readCacheByPrinting(setCode: string, collectorNumber: string): Card | null {
-  const oracleId = byPrinting.get(printingKey(setCode, collectorNumber));
-  return oracleId ? readCache(oracleId) : null;
+  return readPrintingEntry(byPrinting.get(printingKey(setCode, collectorNumber)));
+}
+
+function readCacheByScryfallId(scryfallId: string): Card | null {
+  return readPrintingEntry(byScryfallId.get(scryfallId));
 }
 
 export function normalizeName(name: string): string {
@@ -235,6 +249,7 @@ export function mapScryfallCard(raw: ScryfallCard): Card {
     toughness: raw.toughness ?? front?.toughness ?? null,
     imageUri,
     setCode: raw.set ?? "",
+    collectorNumber: raw.collector_number ?? undefined,
     rarity: raw.rarity ?? "",
     prices: { usd: raw.prices?.usd ?? null, eur: raw.prices?.eur ?? null },
     legalities: raw.legalities ?? {},
@@ -315,11 +330,7 @@ export const scryfallProvider: CardProvider = {
 
       for (const raw of result.data) {
         const card = mapScryfallCard(raw);
-        if (raw.set && raw.collector_number) {
-          cachePrinting(raw.set, raw.collector_number, card);
-        } else {
-          cacheCard(card);
-        }
+        rememberPrinting(card);
         cards.push(card);
 
         for (const lookup of batch) {
@@ -379,6 +390,29 @@ export const scryfallProvider: CardProvider = {
 
   async findByNames(names) {
     return this.findByLookups(names.map((name) => ({ name })));
+  },
+
+  async getByScryfallIds(scryfallIds) {
+    const unique = dedupe(scryfallIds);
+    const cards: Card[] = [];
+    const misses: string[] = [];
+
+    for (const id of unique) {
+      const cached = readCacheByScryfallId(id);
+      if (cached) cards.push(cached);
+      else misses.push(id);
+    }
+
+    for (const batch of chunk(misses, COLLECTION_BATCH_SIZE)) {
+      const result = await fetchCollection(batch.map((id) => ({ id })));
+      for (const raw of result.data) {
+        const card = mapScryfallCard(raw);
+        rememberPrinting(card);
+        cards.push(card);
+      }
+    }
+
+    return cards;
   },
 
   async getByOracleIds(oracleIds) {

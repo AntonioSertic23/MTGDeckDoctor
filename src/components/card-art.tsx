@@ -5,9 +5,10 @@ import { X } from "lucide-react";
 import type { CardPrices } from "@/domain/types";
 import { cn, formatCardPrices } from "@/lib/utils";
 
-type ArtSize = "sm" | "md" | "lg" | "fill";
+type ArtSize = "xs" | "sm" | "md" | "lg" | "fill";
 
 const SIZE: Record<ArtSize, { className: string; width: number; height: number }> = {
+  xs: { className: "h-[84px] w-[60px]", width: 60, height: 84 },
   sm: { className: "h-[112px] w-[80px]", width: 80, height: 112 },
   md: { className: "h-[154px] w-[110px]", width: 110, height: 154 },
   lg: { className: "h-[220px] w-[157px]", width: 157, height: 220 },

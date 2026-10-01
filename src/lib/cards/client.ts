@@ -43,6 +43,25 @@ export async function searchCards(query: string): Promise<Card[]> {
 
 const BY_ORACLE_BATCH = 400;
 
+export async function resolveCardsByScryfallIds(scryfallIds: string[]): Promise<Card[]> {
+  if (scryfallIds.length === 0) return [];
+  const cards: Card[] = [];
+  for (let index = 0; index < scryfallIds.length; index += 400) {
+    const slice = scryfallIds.slice(index, index + 400);
+    const response = await fetch("/api/cards/by-scryfall", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scryfallIds: slice }),
+    });
+    const data = (await response.json()) as { cards?: Card[]; error?: string };
+    if (!response.ok) {
+      throw new Error(data.error ?? "Could not resolve card printings.");
+    }
+    cards.push(...(data.cards ?? []));
+  }
+  return cards;
+}
+
 export async function resolveCardsByOracleIds(oracleIds: string[]): Promise<Card[]> {
   if (oracleIds.length === 0) return [];
   const unique = [...new Set(oracleIds.filter((id) => id.trim().length > 0))];
