@@ -110,7 +110,8 @@ export function CardArt({
           loading="lazy"
           className={cn(
             dim.className,
-            "rounded-lg object-cover shadow-md transition group-hover:shadow-lg group-hover:ring-2 group-hover:ring-accent/40",
+            size === "fill" ? "object-contain" : "object-cover",
+            "rounded-lg shadow-md transition group-hover:shadow-lg group-hover:ring-2 group-hover:ring-accent/40",
           )}
         />
       </button>

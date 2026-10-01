@@ -51,11 +51,15 @@ export async function getCurrentUser(): Promise<User | null> {
  * Returns the signed-in user's id. Does not create anonymous sessions —
  * the UI must sign the user in first.
  */
+let cachedUserId: string | null = null;
+
 export async function requireSupabaseUserId(): Promise<string> {
+  if (cachedUserId) return cachedUserId;
   const user = await getCurrentUser();
   if (!user?.id) {
     throw new Error("Sign in required to sync decks with your account.");
   }
+  cachedUserId = user.id;
   return user.id;
 }
 
@@ -93,6 +97,7 @@ export async function signUpWithPassword(email: string, password: string): Promi
 }
 
 export async function signOut(): Promise<void> {
+  cachedUserId = null;
   const supabase = getSupabaseBrowserClient();
   const { error } = await supabase.auth.signOut();
   if (error) throw error;

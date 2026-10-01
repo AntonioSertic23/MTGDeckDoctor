@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Activity, ChevronDown, Layers, Library, LogIn, Plus, Share2 } from "lucide-react";
+import { Activity, ArrowLeft, ChevronDown, Layers, Library, LogIn, Plus, Share2 } from "lucide-react";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { getStorageBackend } from "@/lib/storage";
 import { cn } from "@/lib/utils";
@@ -51,11 +51,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   const storageLabel = backend === "supabase" ? "Cloud" : "Local";
+  const showBack = !isLogin && pathname !== "/decks";
 
   return (
     <div className="flex min-h-full flex-col">
       <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[color-mix(in_oklab,var(--background)_88%,transparent)] backdrop-blur-md">
         <div className="relative mx-auto flex h-14 max-w-5xl items-center gap-3 px-4 sm:h-16 sm:px-6">
+          {showBack ? (
+            <button
+              type="button"
+              onClick={() => router.back()}
+              className="z-10 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-ink transition hover:bg-black/5 dark:hover:bg-white/5"
+              aria-label="Go back"
+            >
+              <ArrowLeft className="h-5 w-5" aria-hidden />
+            </button>
+          ) : null}
           <Link href="/decks" className="group z-10 flex min-w-0 items-center gap-2.5">
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-white shadow-sm transition group-hover:bg-accent-strong">
               <Activity className="h-4.5 w-4.5" aria-hidden />

@@ -4,12 +4,12 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import type { LocalAnalysis } from "@/lib/decks/analyze-local";
-import { getCachedOrAnalyzeDeck } from "@/lib/decks/analyze-local";
+import { deckContentKey, getCachedOrAnalyzeDeck } from "@/lib/decks/analyze-local";
 import { useDeck, useDecksWithCards } from "@/lib/hooks/use-repository";
 import { usePersistedState } from "@/lib/hooks/use-persisted-state";
 import { getRepository } from "@/lib/storage";
 import { buildSharedCardIndex, findSharedCards } from "@/domain/sharing/shared-cards";
-import type { Color, Deck, ResolvedDeckEntry } from "@/domain/types";
+import type { Color, Deck, DeckWithCards, ResolvedDeckEntry } from "@/domain/types";
 import { CARD_ROLE_LABELS } from "@/domain/types";
 import { HealthMeter } from "@/components/health-meter";
 import { ProblemList, type CardVisual } from "@/components/problem-list";
@@ -30,6 +30,7 @@ const TABS = [
   { id: "explain", label: "Explain" },
   { id: "cards", label: "Cards" },
   { id: "shared", label: "Shared" },
+  { id: "notes", label: "Notes" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -128,10 +129,10 @@ export default function DeckDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const { deck, loading, error, refresh } = useDeck(params.id);
-  const { decks, cards, inventory } = useDecksWithCards();
+  const [tab, setTab] = useState<TabId>("overview");
+  const { decks, cards, inventory, loading: sharedLoading } = useDecksWithCards(tab === "shared");
   const [analysis, setAnalysis] = useState<LocalAnalysis | null>(null);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
-  const [tab, setTab] = useState<TabId>("overview");
   const [notesDraft, setNotesDraft] = useState("");
   const [cardSort, setCardSort] = usePersistedState(CARD_SORT_KEY, "name", isCardSort);
   const [deleting, startDelete] = useTransition();
@@ -147,6 +148,16 @@ export default function DeckDetailPage() {
 
     async function run() {
       if (!deck) return;
+      const preview = previewFromSnapshot(deck);
+      setAnalysis((current) => {
+        if (
+          current?.resolved.deck.id === deck.deck.id &&
+          current.resolved.entries.length > 0
+        ) {
+          return current;
+        }
+        return preview;
+      });
       try {
         setAnalyzeError(null);
         const result = await getCachedOrAnalyzeDeck(deck);
@@ -208,6 +219,9 @@ export default function DeckDetailPage() {
     );
   }
 
+  const cardsPending = Boolean(
+    analysis && deck && analysis.resolved.entries.length === 0 && deck.cards.length > 0,
+  );
   const stats = analysis?.analysis.statistics;
   const commanders = analysis?.resolved.commanders ?? [];
   const commanderNames = commanders.map((c) => c.name).join(" / ");
@@ -294,6 +308,7 @@ export default function DeckDetailPage() {
   return (
     <div className="space-y-5">
       <PageHeader
+        layout="stacked"
         eyebrow="Diagnosis"
         title={deck.deck.name}
         description={
@@ -353,40 +368,7 @@ export default function DeckDetailPage() {
         }
       />
 
-      <Panel className="space-y-3">
-        <div>
-          <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold">Notes</h2>
-          <p className="mt-1 text-sm text-muted">
-            Strategy, upgrades, playtest reminders — anything useful for this list.
-          </p>
-        </div>
-        <textarea
-          value={notesDraft}
-          onChange={(e) => setNotesDraft(e.target.value)}
-          rows={5}
-          placeholder="Add notes for this deck…"
-          disabled={busy || deleting}
-          className="w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2.5 text-sm leading-relaxed outline-none ring-accent focus:ring-2 disabled:opacity-60"
-        />
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant="primary"
-            disabled={busy || deleting || !notesDirty}
-            onClick={saveNotes}
-          >
-            Save notes
-          </Button>
-          <Button
-            variant="secondary"
-            disabled={busy || deleting || (!savedNotes && !notesDraft.trim())}
-            onClick={clearNotes}
-          >
-            Clear
-          </Button>
-        </div>
-      </Panel>
-
-      {analysis ? (
+      {analysis && !cardsPending ? (
         <CommanderPanel
           commanders={commanders}
           candidates={analysis.resolved.entries}
@@ -429,8 +411,41 @@ export default function DeckDetailPage() {
         </div>
       </div>
 
-      {!analysis ? (
-        <p className="text-sm text-muted">Running diagnosis…</p>
+      {tab === "notes" ? (
+        <Panel className="space-y-3">
+          <div>
+            <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold">Notes</h2>
+            <p className="mt-1 text-sm text-muted">
+              Strategy, upgrades, playtest reminders — anything useful for this list.
+            </p>
+          </div>
+          <textarea
+            value={notesDraft}
+            onChange={(e) => setNotesDraft(e.target.value)}
+            rows={8}
+            placeholder="Add notes for this deck…"
+            disabled={busy || deleting}
+            className="w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2.5 text-sm leading-relaxed outline-none ring-accent focus:ring-2 disabled:opacity-60"
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button variant="primary" disabled={busy || deleting || !notesDirty} onClick={saveNotes}>
+              Save notes
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={busy || deleting || (!savedNotes && !notesDraft.trim())}
+              onClick={clearNotes}
+            >
+              Clear
+            </Button>
+          </div>
+        </Panel>
+      ) : !analysis ? (
+        <p className="text-sm text-muted">
+          {deck.deck.analysisSnapshot?.contentKey === deckContentKey(deck)
+            ? "Loading cards…"
+            : "Running diagnosis…"}
+        </p>
       ) : (
         <>
           {tab === "overview" ? (
@@ -538,7 +553,9 @@ export default function DeckDetailPage() {
                     Cards
                   </h2>
                   <p className="mt-1 text-sm text-muted">
-                    {analysis.resolved.entries.length} unique · {stats?.totalCards ?? "—"} total
+                    {cardsPending
+                      ? "Loading cards…"
+                      : `${analysis.resolved.entries.length} unique · ${stats?.totalCards ?? "—"} total`}
                   </p>
                 </div>
                 <label className="block w-full space-y-1.5 sm:w-44">
@@ -608,11 +625,32 @@ export default function DeckDetailPage() {
               <p className="mb-4 text-sm text-muted">
                 Cards in this list that also appear elsewhere in your browser library.
               </p>
-              <SharedCardList items={sharedForDeck} cards={cards} />
+              {sharedLoading ? (
+                <p className="text-sm text-muted">Loading other decks…</p>
+              ) : (
+                <SharedCardList items={sharedForDeck} cards={cards} />
+              )}
             </Panel>
           ) : null}
+
         </>
       )}
     </div>
   );
+}
+
+function previewFromSnapshot(deck: DeckWithCards): LocalAnalysis | null {
+  const snap = deck.deck.analysisSnapshot;
+  if (!snap || snap.contentKey !== deckContentKey(deck)) return null;
+  return {
+    resolved: {
+      deck: deck.deck,
+      entries: [],
+      commanders: [],
+      unresolved: [],
+    },
+    analysis: snap.analysis,
+    additions: snap.additions ?? [],
+    healthSuggestions: snap.healthSuggestions ?? {},
+  };
 }

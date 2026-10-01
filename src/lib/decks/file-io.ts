@@ -152,8 +152,6 @@ function sanitizeDeck(deck: Deck): Deck {
       : [],
     description: deck.description,
     ready: Boolean(deck.ready),
-    timesBrought: Math.max(0, Number(deck.timesBrought) || 0),
-    timesPlayed: Math.max(0, Number(deck.timesPlayed) || 0),
     createdAt: deck.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     analysisSnapshot: null,

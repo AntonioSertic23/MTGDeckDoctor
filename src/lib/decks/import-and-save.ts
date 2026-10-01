@@ -101,8 +101,6 @@ export async function importAndSaveDeck(
     format: "commander",
     commanderOracleIds: resolved.commanderOracleIds,
     ready: false,
-    timesBrought: 0,
-    timesPlayed: 0,
     createdAt: now,
     updatedAt: now,
   };

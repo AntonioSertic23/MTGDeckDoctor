@@ -122,10 +122,6 @@ export interface Deck {
   description?: string;
   /** True when the physical list is built and ready to bring to a table. */
   ready: boolean;
-  /** How many times this deck was brought to a play session. */
-  timesBrought: number;
-  /** How many games were played with this deck. */
-  timesPlayed: number;
   createdAt: string;
   updatedAt: string;
   /**
@@ -141,6 +137,7 @@ export interface DeckAnalysisSnapshot {
   contentKey: string;
   analysis: DeckAnalysis;
   additions: AdditionCandidate[];
+  healthSuggestions?: Partial<Record<HealthCategoryId, AdditionCandidate[]>>;
   computedAt: string;
 }
 

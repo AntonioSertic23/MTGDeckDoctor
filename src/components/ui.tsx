@@ -5,21 +5,36 @@ export function PageHeader({
   title,
   description,
   actions,
+  layout = "split",
 }: {
   eyebrow?: string;
   title: string;
   description?: string;
   actions?: React.ReactNode;
+  /** `stacked` keeps the title on its own full-width row so long names wrap across the page. */
+  layout?: "split" | "stacked";
 }) {
   return (
-    <div className="mb-6 flex flex-col gap-3 sm:mb-8 sm:flex-row sm:items-end sm:justify-between">
-      <div className="min-w-0 space-y-1.5">
+    <div
+      className={cn(
+        "mb-6 flex flex-col gap-3 sm:mb-8",
+        layout === "split" && "sm:flex-row sm:items-end sm:justify-between",
+      )}
+    >
+      <div className="min-w-0 w-full space-y-1.5">
         {eyebrow ? (
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-accent-strong">
             {eyebrow}
           </p>
         ) : null}
-        <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold tracking-tight text-ink sm:text-4xl dark:text-white">
+        <h1
+          className={cn(
+            "font-[family-name:var(--font-display)] font-semibold tracking-tight text-ink dark:text-white",
+            layout === "stacked"
+              ? "w-full text-left text-2xl leading-tight sm:text-3xl"
+              : "text-3xl sm:text-4xl",
+          )}
+        >
           {title}
         </h1>
         {description ? (

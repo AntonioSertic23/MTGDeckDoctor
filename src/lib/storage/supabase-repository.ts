@@ -115,8 +115,6 @@ function toDeck(row: DeckRow): Deck {
     commanderOracleIds: row.commander_oracle_ids ?? [],
     description: row.description ?? undefined,
     ready: Boolean(row.ready),
-    timesBrought: Math.max(0, Number(row.times_brought) || 0),
-    timesPlayed: Math.max(0, Number(row.times_played) || 0),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     analysisSnapshot: row.analysis_snapshot ?? null,
@@ -248,8 +246,6 @@ export const supabaseRepository: DeckRepository = {
       commander_oracle_ids: deck.commanderOracleIds,
       description: deck.description ?? null,
       ready: deck.ready ?? false,
-      times_brought: deck.timesBrought ?? 0,
-      times_played: deck.timesPlayed ?? 0,
       created_at: deck.createdAt,
       updated_at: deck.updatedAt,
     });
@@ -278,8 +274,6 @@ export const supabaseRepository: DeckRepository = {
         commander_oracle_ids: deck.commanderOracleIds,
         description: deck.description ?? null,
         ready: deck.ready ?? false,
-        times_brought: deck.timesBrought ?? 0,
-        times_played: deck.timesPlayed ?? 0,
         updated_at: new Date().toISOString(),
         // Keep existing snapshot unless callers cleared it (e.g. commander change).
         analysis_snapshot: deck.analysisSnapshot ?? null,
@@ -341,13 +335,14 @@ export const supabaseRepository: DeckRepository = {
     const supabase = getSupabaseBrowserClient();
     await requireUserId();
 
-    const cards: Card[] = [];
-    for (const idChunk of chunkIds(unique, IN_FILTER_CHUNK)) {
-      const { data, error } = await supabase.from("cards").select("*").in("oracle_id", idChunk);
-      if (error) throw error;
-      cards.push(...((data as CardRow[]) ?? []).map(toCard));
-    }
-    return cards;
+    const pages = await Promise.all(
+      chunkIds(unique, IN_FILTER_CHUNK).map(async (idChunk) => {
+        const { data, error } = await supabase.from("cards").select("*").in("oracle_id", idChunk);
+        if (error) throw error;
+        return ((data as CardRow[]) ?? []).map(toCard);
+      }),
+    );
+    return pages.flat();
   },
 
   async getAllCards() {
@@ -421,6 +416,13 @@ export const supabaseRepository: DeckRepository = {
       );
       if (error) throw error;
     }
+  },
+
+  async clearInventory() {
+    const supabase = getSupabaseBrowserClient();
+    const userId = await requireUserId();
+    const { error } = await supabase.from("inventory_items").delete().eq("user_id", userId);
+    if (error) throw error;
   },
 
   async listAllocations() {

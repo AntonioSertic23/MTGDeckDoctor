@@ -4,11 +4,10 @@ import Link from "next/link";
 import { useMemo, useTransition } from "react";
 import { DeckClinicList } from "@/components/deck-clinic-list";
 import { Button, buttonClassName, EmptyState, PageHeader, Panel } from "@/components/ui";
-import type { Card, Color, Deck, DeckWithCards } from "@/domain/types";
+import type { Card, Color, Deck, DeckAnalysis } from "@/domain/types";
 import { exportDecksToFile } from "@/lib/decks/file-io";
-import { useDeckAnalyses } from "@/lib/hooks/use-deck-analyses";
 import { usePersistedState } from "@/lib/hooks/use-persisted-state";
-import { useDecksWithCards } from "@/lib/hooks/use-repository";
+import { useDeckShelf } from "@/lib/hooks/use-repository";
 
 type DeckSort = "name" | "created" | "updated" | "colors";
 type ReadyFilter = "all" | "ready" | "not-ready";
@@ -53,32 +52,28 @@ function colorSortKey(colors: Color[]): string {
   return `${String(colors.length).padStart(2, "0")}-${colors.join("")}`;
 }
 
-function filterDecks(decks: DeckWithCards[], readyFilter: ReadyFilter): DeckWithCards[] {
+function filterDecks(decks: Deck[], readyFilter: ReadyFilter): Deck[] {
   if (readyFilter === "all") return decks;
-  if (readyFilter === "ready") return decks.filter(({ deck }) => deck.ready);
-  return decks.filter(({ deck }) => !deck.ready);
+  if (readyFilter === "ready") return decks.filter((deck) => deck.ready);
+  return decks.filter((deck) => !deck.ready);
 }
 
-function sortDecks(
-  decks: DeckWithCards[],
-  cards: Map<string, Card>,
-  sort: DeckSort,
-): DeckWithCards[] {
+function sortDecks(decks: Deck[], cards: Map<string, Card>, sort: DeckSort): Deck[] {
   const copy = [...decks];
   copy.sort((a, b) => {
     switch (sort) {
       case "name":
-        return a.deck.name.localeCompare(b.deck.name, undefined, { sensitivity: "base" });
+        return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
       case "created":
-        return Date.parse(b.deck.createdAt) - Date.parse(a.deck.createdAt);
+        return Date.parse(b.createdAt) - Date.parse(a.createdAt);
       case "updated":
-        return Date.parse(b.deck.updatedAt) - Date.parse(a.deck.updatedAt);
+        return Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
       case "colors": {
-        const byColor = colorSortKey(commanderColors(a.deck, cards)).localeCompare(
-          colorSortKey(commanderColors(b.deck, cards)),
+        const byColor = colorSortKey(commanderColors(a, cards)).localeCompare(
+          colorSortKey(commanderColors(b, cards)),
         );
         if (byColor !== 0) return byColor;
-        return a.deck.name.localeCompare(b.deck.name, undefined, { sensitivity: "base" });
+        return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
       }
       default:
         return 0;
@@ -91,8 +86,14 @@ const selectClassName =
   "w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2.5 text-sm outline-none ring-accent focus:ring-2";
 
 export default function DecksPage() {
-  const { decks, cards, loading, error } = useDecksWithCards();
-  const scores = useDeckAnalyses(decks);
+  const { decks, cards, loading, error } = useDeckShelf();
+  const scores = useMemo(() => {
+    const next: Record<string, DeckAnalysis> = {};
+    for (const deck of decks) {
+      if (deck.analysisSnapshot?.analysis) next[deck.id] = deck.analysisSnapshot.analysis;
+    }
+    return next;
+  }, [decks]);
   const [pending, startTransition] = useTransition();
   const [sort, setSort] = usePersistedState(DECK_SORT_KEY, "name", isDeckSort);
   const [readyFilter, setReadyFilter] = usePersistedState(

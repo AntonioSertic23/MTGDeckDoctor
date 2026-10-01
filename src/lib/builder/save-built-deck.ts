@@ -17,8 +17,6 @@ export async function saveBuiltDeck(result: CollectionBuildResult): Promise<stri
     commanderOracleIds: [result.commander.oracleId],
     description: notesFor(result),
     ready: false,
-    timesBrought: 0,
-    timesPlayed: 0,
     createdAt: now,
     updatedAt: now,
   };

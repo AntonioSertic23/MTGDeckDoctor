@@ -38,8 +38,6 @@ function deck(id: string, name: string, oracleIds: string[]): DeckWithCards {
       format: "commander",
       commanderOracleIds: [],
       ready: false,
-      timesBrought: 0,
-      timesPlayed: 0,
       createdAt: "",
       updatedAt: "",
     },

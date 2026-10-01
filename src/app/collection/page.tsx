@@ -19,6 +19,7 @@ import {
 } from "@/lib/collection/import-collection";
 import { usePersistedState } from "@/lib/hooks/use-persisted-state";
 import { useInventory } from "@/lib/hooks/use-repository";
+import { getRepository } from "@/lib/storage";
 import { cardEurPrice, formatCardPrices } from "@/lib/utils";
 
 type CollectionSort = "name" | "quantity" | "price" | "manaValue";
@@ -148,6 +149,7 @@ export default function CollectionPage() {
   const [colorFilter, setColorFilter] = usePersistedState(COLOR_KEY, "all", isColorFilter);
   const [typeFilter, setTypeFilter] = usePersistedState(TYPE_KEY, "all", isTypeFilter);
   const [importing, setImporting] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [lastImport, setLastImport] = useState<CollectionImportResult | null>(null);
 
@@ -209,6 +211,24 @@ export default function CollectionPage() {
     }
   }
 
+  async function clearCollection() {
+    if (inventory.length === 0 || clearing) return;
+    const ok = window.confirm(
+      "Delete your entire collection? Owned-card counts will be removed. Deck lists stay. This cannot be undone.",
+    );
+    if (!ok) return;
+    setClearing(true);
+    setImportMessage(null);
+    try {
+      await getRepository().clearInventory();
+      await refresh();
+    } catch (err) {
+      setImportMessage(err instanceof Error ? err.message : "Could not delete the collection.");
+    } finally {
+      setClearing(false);
+    }
+  }
+
   async function onFileSelected(file: File | null) {
     if (!file) return;
     setImporting(true);
@@ -252,9 +272,19 @@ export default function CollectionPage() {
               <WandSparkles className="h-4 w-4" aria-hidden />
               Build deck
             </Link>
+            {inventory.length > 0 ? (
+              <Button
+                type="button"
+                variant="danger"
+                disabled={importing || clearing}
+                onClick={() => void clearCollection()}
+              >
+                {clearing ? "Deleting…" : "Delete collection"}
+              </Button>
+            ) : null}
             <Button
               type="button"
-              disabled={importing}
+              disabled={importing || clearing}
               onClick={() => fileRef.current?.click()}
             >
               <Upload className="h-4 w-4" aria-hidden />
@@ -306,7 +336,7 @@ export default function CollectionPage() {
       ) : (
         <>
           <Panel className="space-y-3">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
               <label className="block min-w-0 flex-1 space-y-1.5">
                 <span className="text-xs font-medium text-muted">Search</span>
                 <input

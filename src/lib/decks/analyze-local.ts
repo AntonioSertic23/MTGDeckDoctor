@@ -56,7 +56,12 @@ export async function getCachedOrAnalyzeDeck(
 
   if (!options.force && snap && snap.contentKey === key) {
     const resolved = await resolveOnly(deck);
-    return finishWithCollection(resolved, snap.analysis);
+    return {
+      resolved,
+      analysis: snap.analysis,
+      additions: snap.additions ?? [],
+      healthSuggestions: snap.healthSuggestions ?? {},
+    };
   }
 
   const result = await analyzeDeckLocal(deck);
@@ -64,6 +69,7 @@ export async function getCachedOrAnalyzeDeck(
     contentKey: key,
     analysis: result.analysis,
     additions: result.additions,
+    healthSuggestions: result.healthSuggestions,
     computedAt: new Date().toISOString(),
   };
   await getRepository().saveAnalysisSnapshot(deck.deck.id, snapshot);

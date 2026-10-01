@@ -197,6 +197,11 @@ export const idbRepository: DeckRepository = {
     await tx.done;
   },
 
+  async clearInventory() {
+    const db = await getDb();
+    await db.clear("inventory");
+  },
+
   async listAllocations() {
     const db = await getDb();
     return db.getAll("allocations");

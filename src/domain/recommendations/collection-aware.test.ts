@@ -36,8 +36,6 @@ function buildGreenDeck(): { deck: DeckWithCards; cards: Map<string, Card> } {
       format: "commander",
       commanderOracleIds: ["cmd"],
       ready: false,
-      timesBrought: 0,
-      timesPlayed: 0,
       createdAt: "",
       updatedAt: "",
     },
