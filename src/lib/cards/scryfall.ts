@@ -37,6 +37,7 @@ const byScryfallId = new Map<string, CacheEntry>();
 /** Printing cache stores the card itself. Oracle id is shared by every printing. */
 const byPrinting = new Map<string, CacheEntry>();
 const bySetCode = new Map<string, { cards: Card[]; storedAt: number }>();
+let setNameCache: { names: Map<string, string>; storedAt: number } | null = null;
 
 let lastRequestAt = 0;
 
@@ -542,6 +543,23 @@ export const scryfallProvider: CardProvider = {
     }
   },
 };
+
+/** Code → full English set name from Scryfall `/sets` (process-cached). */
+export async function getSetNameMap(): Promise<Map<string, string>> {
+  if (setNameCache && Date.now() - setNameCache.storedAt <= CACHE_TTL_MS) {
+    return setNameCache.names;
+  }
+
+  const result = await request<{ data: { code?: string; name?: string }[] }>("/sets");
+  const names = new Map<string, string>();
+  for (const set of result.data ?? []) {
+    const code = set.code?.trim().toLowerCase();
+    const name = set.name?.trim();
+    if (code && name) names.set(code, name);
+  }
+  setNameCache = { names, storedAt: Date.now() };
+  return names;
+}
 
 function dedupe(values: string[]): string[] {
   return [...new Set(values.map((v) => v.trim()).filter((v) => v.length > 0))];

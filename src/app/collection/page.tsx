@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Eye, EyeOff, Library, Minus, Plus, Upload, WandSparkles } from "lucide-react";
+import { Check, Copy, Eye, EyeOff, Library, Minus, Plus, Upload, WandSparkles } from "lucide-react";
 import { CardArt } from "@/components/card-art";
 import { Button, buttonClassName, EmptyState, PageHeader, Panel, StatChip } from "@/components/ui";
 import { classifyCard } from "@/domain/cards/classifier";
@@ -13,7 +13,7 @@ import {
   type Color,
   type InventoryItem,
 } from "@/domain/types";
-import { fetchCardsBySet } from "@/lib/cards/client";
+import { fetchCardsBySet, fetchSetNames } from "@/lib/cards/client";
 import {
   importArchidektCollectionCsv,
   type CollectionImportResult,
@@ -161,6 +161,8 @@ export default function CollectionPage() {
   const [setCards, setSetCards] = useState<Card[]>([]);
   const [loadingSet, setLoadingSet] = useState(false);
   const [setError, setSetError] = useState<string | null>(null);
+  const [setNames, setSetNames] = useState<Map<string, string>>(() => new Map());
+  const [copiedMissing, setCopiedMissing] = useState(false);
   const [importing, setImporting] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [importMessage, setImportMessage] = useState<string | null>(null);
@@ -171,6 +173,20 @@ export default function CollectionPage() {
     [inventory],
   );
 
+  useEffect(() => {
+    let cancelled = false;
+    void fetchSetNames()
+      .then((names) => {
+        if (!cancelled) setSetNames(names);
+      })
+      .catch(() => {
+        // Labels fall back to set codes when the catalog is unavailable.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const setOptions = useMemo(() => {
     const counts = new Map<string, number>();
     for (const item of inventory) {
@@ -179,9 +195,13 @@ export default function CollectionPage() {
       counts.set(code, (counts.get(code) ?? 0) + 1);
     }
     return [...counts.entries()]
-      .map(([code, ownedCount]) => ({ code, ownedCount }))
-      .sort((a, b) => a.code.localeCompare(b.code));
-  }, [inventory, cards]);
+      .map(([code, ownedCount]) => ({
+        code,
+        ownedCount,
+        name: setNames.get(code) ?? code.toUpperCase(),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [inventory, cards, setNames]);
 
   useEffect(() => {
     if (setFilter !== "all" && !setOptions.some((opt) => opt.code === setFilter)) {
@@ -314,10 +334,32 @@ export default function CollectionPage() {
     [inventory],
   );
 
-  const missingCount = useMemo(
-    () => filtered.reduce((sum, row) => sum + (row.missing ? 1 : 0), 0),
-    [filtered],
-  );
+  const missingInSet = useMemo(() => {
+    if (setFilter === "all" || setCards.length === 0) return [] as Card[];
+    return setCards
+      .filter((card) => !ownedOracleIds.has(card.oracleId))
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [setFilter, setCards, ownedOracleIds]);
+
+  const missingCount = missingInSet.length;
+
+  const selectedSetLabel =
+    setFilter === "all"
+      ? "All sets"
+      : (setNames.get(setFilter) ?? setFilter.toUpperCase());
+
+  async function copyMissingNames() {
+    if (missingInSet.length === 0) return;
+    const text = missingInSet.map((card) => card.name).join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedMissing(true);
+      window.setTimeout(() => setCopiedMissing(false), 2000);
+    } catch {
+      setImportMessage("Could not copy missing card names.");
+    }
+  }
 
   async function setOwned(oracleId: string, quantity: number) {
     try {
@@ -455,17 +497,18 @@ export default function CollectionPage() {
       ) : (
         <>
           <Panel className="space-y-3">
-            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-              <label className="block min-w-0 flex-1 space-y-1.5">
-                <span className="text-xs font-medium text-muted">Search</span>
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search by name"
-                  className={selectClassName}
-                />
-              </label>
-              <label className="block w-full space-y-1.5 sm:w-40">
+            <label className="block space-y-1.5">
+              <span className="text-xs font-medium text-muted">Search</span>
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search by name"
+                className={selectClassName}
+              />
+            </label>
+
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <label className="block min-w-0 space-y-1.5">
                 <span className="text-xs font-medium text-muted">Sort</span>
                 <select
                   className={selectClassName}
@@ -479,7 +522,7 @@ export default function CollectionPage() {
                   ))}
                 </select>
               </label>
-              <label className="block w-full space-y-1.5 sm:w-40">
+              <label className="block min-w-0 space-y-1.5">
                 <span className="text-xs font-medium text-muted">Color</span>
                 <select
                   className={selectClassName}
@@ -493,7 +536,7 @@ export default function CollectionPage() {
                   ))}
                 </select>
               </label>
-              <label className="block w-full space-y-1.5 sm:w-44">
+              <label className="block min-w-0 space-y-1.5">
                 <span className="text-xs font-medium text-muted">Type</span>
                 <select
                   className={selectClassName}
@@ -507,7 +550,7 @@ export default function CollectionPage() {
                   ))}
                 </select>
               </label>
-              <label className="block w-full space-y-1.5 sm:w-44">
+              <label className="block min-w-0 space-y-1.5">
                 <span className="text-xs font-medium text-muted">Role</span>
                 <select
                   className={selectClassName}
@@ -524,7 +567,10 @@ export default function CollectionPage() {
                   ))}
                 </select>
               </label>
-              <label className="block w-full space-y-1.5 sm:w-48">
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <label className="block min-w-0 flex-1 space-y-1.5">
                 <span className="text-xs font-medium text-muted">Set</span>
                 <select
                   className={selectClassName}
@@ -533,17 +579,18 @@ export default function CollectionPage() {
                     const next = e.target.value;
                     setSetFilter(next === "all" ? "all" : next.toLowerCase());
                     if (next === "all") setShowMissing(false);
+                    setCopiedMissing(false);
                   }}
                 >
                   <option value="all">All sets</option>
                   {setOptions.map((opt) => (
                     <option key={opt.code} value={opt.code}>
-                      {opt.code.toUpperCase()} ({opt.ownedCount})
+                      {opt.name} ({opt.code.toUpperCase()}, {opt.ownedCount})
                     </option>
                   ))}
                 </select>
               </label>
-              <div className="flex w-full flex-col gap-1.5 sm:w-auto">
+              <div className="flex w-full flex-col gap-1.5 sm:w-auto sm:shrink-0">
                 <span className="text-xs font-medium text-muted">Checklist</span>
                 <Button
                   type="button"
@@ -565,11 +612,30 @@ export default function CollectionPage() {
                 </Button>
               </div>
             </div>
+
             {setError ? <p className="text-sm text-rose-600">{setError}</p> : null}
             {showMissing && setFilter !== "all" && !loadingSet && !setError ? (
-              <p className="text-xs text-muted">
-                Gray tiles are cards from {setFilter.toUpperCase()} you do not own yet.
-              </p>
+              <div className="flex flex-col gap-2 rounded-xl border border-[var(--border)] bg-[var(--background)]/60 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-ink">
+                  Missing <span className="font-semibold tabular-nums">{missingCount}</span> of{" "}
+                  <span className="font-semibold tabular-nums">{setCards.length}</span> in{" "}
+                  {selectedSetLabel}.
+                </p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={missingCount === 0}
+                  onClick={() => void copyMissingNames()}
+                  className="w-full sm:w-auto"
+                >
+                  {copiedMissing ? (
+                    <Check className="h-4 w-4" aria-hidden />
+                  ) : (
+                    <Copy className="h-4 w-4" aria-hidden />
+                  )}
+                  {copiedMissing ? "Copied" : "Copy missing names"}
+                </Button>
+              </div>
             ) : null}
           </Panel>
 

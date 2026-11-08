@@ -51,6 +51,18 @@ export async function fetchCardsBySet(setCode: string): Promise<Card[]> {
   return data.cards;
 }
 
+export async function fetchSetNames(): Promise<Map<string, string>> {
+  const response = await fetch("/api/cards/sets");
+  const data = (await response.json()) as {
+    sets?: { code: string; name: string }[];
+    error?: string;
+  };
+  if (!response.ok) {
+    throw new Error(data.error ?? "Could not load set names.");
+  }
+  return new Map((data.sets ?? []).map((set) => [set.code, set.name]));
+}
+
 /**
  * One Scryfall /cards/collection call per serverless invocation (max 75 ids,
  * 2 req/sec). Keeps each Netlify function well under the default time budget
