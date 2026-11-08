@@ -2,6 +2,8 @@ import { z } from "zod";
 import { scryfallProvider } from "@/lib/cards/scryfall";
 import { cardProviderErrorResponse } from "@/lib/api/errors";
 
+export const maxDuration = 60;
+
 const bodySchema = z.object({
   oracleIds: z.array(z.string().min(1)).min(1).max(500),
 });

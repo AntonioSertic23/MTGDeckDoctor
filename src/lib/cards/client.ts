@@ -52,11 +52,11 @@ export async function fetchCardsBySet(setCode: string): Promise<Card[]> {
 }
 
 /**
- * Keep each serverless invocation short: Scryfall allows 75 ids per collection
- * call and only 2 calls/sec, so two batches (~1.5s+) already stress Netlify's
- * default function budget when the route also does retries.
+ * One Scryfall /cards/collection call per serverless invocation (max 75 ids,
+ * 2 req/sec). Keeps each Netlify function well under the default time budget
+ * even when a 429 forces a cooldown retry.
  */
-const SERVER_CARD_BATCH = 150;
+const SERVER_CARD_BATCH = 75;
 
 export async function resolveCardsByScryfallIds(scryfallIds: string[]): Promise<Card[]> {
   if (scryfallIds.length === 0) return [];

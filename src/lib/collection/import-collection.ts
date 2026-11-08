@@ -143,8 +143,13 @@ async function refreshOwnedPrintings(
   }
   if (preferred.length === 0) return { ids: new Set(), updated: 0 };
   report("hydrate", `Updating ${preferred.length} owned printing(s)…`);
-  const result = await importArchidektCollection(csvText);
-  return { ids: new Set(preferred.map((card) => card.oracleId)), updated: result.updated };
+  try {
+    const result = await importArchidektCollection(csvText);
+    return { ids: new Set(preferred.map((card) => card.oracleId)), updated: result.updated };
+  } catch {
+    // Printing art/prices can retry on a later import; inventory qty must still land.
+    return { ids: new Set(), updated: 0 };
+  }
 }
 
 function normalize(name: string): string {
