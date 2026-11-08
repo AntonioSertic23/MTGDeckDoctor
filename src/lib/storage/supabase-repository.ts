@@ -128,8 +128,11 @@ async function requireUserId(): Promise<string> {
 /** Keep `.in()` filters under typical URL / gateway limits. */
 const IN_FILTER_CHUNK = 100;
 
-/** PostgREST default max rows is 1000 — page past it for multi-deck loads. */
+/** PostgREST default max rows is 1000 — page past it for large collections. */
 const PAGE_SIZE = 1000;
+
+/** Upsert body size stays reasonable on Netlify / Supabase gateways. */
+const UPSERT_CHUNK = 200;
 
 function chunkIds<T>(items: T[], size: number): T[][] {
   if (items.length === 0) return [];
@@ -140,28 +143,42 @@ function chunkIds<T>(items: T[], size: number): T[][] {
   return chunks;
 }
 
+type SupabaseClient = ReturnType<typeof getSupabaseBrowserClient>;
+
+/** Walk `.range()` until a short page — required once inventory exceeds 1000 rows. */
+async function fetchAllRows<T>(
+  fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  const rows: T[] = [];
+  let from = 0;
+  for (;;) {
+    const to = from + PAGE_SIZE - 1;
+    const { data, error } = await fetchPage(from, to);
+    if (error) throw error;
+    const page = data ?? [];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return rows;
+}
+
 async function fetchAllDeckCards(
-  supabase: ReturnType<typeof getSupabaseBrowserClient>,
+  supabase: SupabaseClient,
   deckIds: string[],
 ): Promise<DeckCardRow[]> {
   if (deckIds.length === 0) return [];
 
   const rows: DeckCardRow[] = [];
   for (const idChunk of chunkIds(deckIds, IN_FILTER_CHUNK)) {
-    let from = 0;
-    for (;;) {
-      const to = from + PAGE_SIZE - 1;
-      const { data, error } = await supabase
+    const pageRows = await fetchAllRows<DeckCardRow>((from, to) =>
+      supabase
         .from("deck_cards")
         .select("deck_id, oracle_id, quantity")
         .in("deck_id", idChunk)
-        .range(from, to);
-      if (error) throw error;
-      const page = (data as DeckCardRow[]) ?? [];
-      rows.push(...page);
-      if (page.length < PAGE_SIZE) break;
-      from += PAGE_SIZE;
-    }
+        .range(from, to),
+    );
+    rows.push(...pageRows);
   }
   return rows;
 }
@@ -191,15 +208,13 @@ export const supabaseRepository: DeckRepository = {
     if (error) throw error;
     if (!deck) return null;
 
-    const { data: cards, error: cardsError } = await supabase
-      .from("deck_cards")
-      .select("oracle_id, quantity")
-      .eq("deck_id", id);
-    if (cardsError) throw cardsError;
+    const cards = await fetchAllRows<Pick<DeckCardRow, "oracle_id" | "quantity">>((from, to) =>
+      supabase.from("deck_cards").select("oracle_id, quantity").eq("deck_id", id).range(from, to),
+    );
 
     return {
       deck: toDeck(deck as DeckRow),
-      cards: (cards as Pick<DeckCardRow, "oracle_id" | "quantity">[]).map((row) => ({
+      cards: cards.map((row) => ({
         oracleId: row.oracle_id,
         quantity: row.quantity,
       })),
@@ -360,21 +375,26 @@ export const supabaseRepository: DeckRepository = {
     if (cards.length === 0) return;
     const supabase = getSupabaseBrowserClient();
     await requireUserId();
-    const { error } = await supabase.from("cards").upsert(cards.map(fromCard), {
-      onConflict: "oracle_id",
-    });
-    if (error) throw error;
+    for (const chunk of chunkIds(cards, UPSERT_CHUNK)) {
+      const { error } = await supabase.from("cards").upsert(chunk.map(fromCard), {
+        onConflict: "oracle_id",
+      });
+      if (error) throw error;
+    }
   },
 
   async listInventory() {
     const supabase = getSupabaseBrowserClient();
     const userId = await requireUserId();
-    const { data, error } = await supabase
-      .from("inventory_items")
-      .select("oracle_id, quantity")
-      .eq("user_id", userId);
-    if (error) throw error;
-    return ((data as { oracle_id: string; quantity: number }[]) ?? []).map((row) => ({
+    const data = await fetchAllRows<{ oracle_id: string; quantity: number }>((from, to) =>
+      supabase
+        .from("inventory_items")
+        .select("oracle_id, quantity")
+        .eq("user_id", userId)
+        .order("oracle_id")
+        .range(from, to),
+    );
+    return data.map((row) => ({
       oracleId: row.oracle_id,
       quantity: row.quantity,
     }));
@@ -392,21 +412,16 @@ export const supabaseRepository: DeckRepository = {
     const toDelete = items.filter((item) => item.quantity <= 0).map((item) => item.oracleId);
     const toUpsert = items.filter((item) => item.quantity > 0);
 
-    if (toDelete.length > 0) {
+    for (const idChunk of chunkIds(toDelete, IN_FILTER_CHUNK)) {
       const { error } = await supabase
         .from("inventory_items")
         .delete()
         .eq("user_id", userId)
-        .in("oracle_id", toDelete);
+        .in("oracle_id", idChunk);
       if (error) throw error;
     }
 
-    if (toUpsert.length === 0) return;
-
-    // PostgREST prefers moderate payloads; chunk large collection imports.
-    const chunkSize = 200;
-    for (let i = 0; i < toUpsert.length; i += chunkSize) {
-      const chunk = toUpsert.slice(i, i + chunkSize);
+    for (const chunk of chunkIds(toUpsert, UPSERT_CHUNK)) {
       const { error } = await supabase.from("inventory_items").upsert(
         chunk.map((item) => ({
           user_id: userId,
@@ -428,18 +443,20 @@ export const supabaseRepository: DeckRepository = {
   async listAllocations() {
     const supabase = getSupabaseBrowserClient();
     const userId = await requireUserId();
-    const { data, error } = await supabase
-      .from("card_allocations")
-      .select("oracle_id, deck_id, quantity")
-      .eq("user_id", userId);
-    if (error) throw error;
-    return ((data as { oracle_id: string; deck_id: string; quantity: number }[]) ?? []).map(
-      (row) => ({
-        oracleId: row.oracle_id,
-        deckId: row.deck_id,
-        quantity: row.quantity,
-      }),
+    const data = await fetchAllRows<{ oracle_id: string; deck_id: string; quantity: number }>(
+      (from, to) =>
+        supabase
+          .from("card_allocations")
+          .select("oracle_id, deck_id, quantity")
+          .eq("user_id", userId)
+          .order("oracle_id")
+          .range(from, to),
     );
+    return data.map((row) => ({
+      oracleId: row.oracle_id,
+      deckId: row.deck_id,
+      quantity: row.quantity,
+    }));
   },
 
   async setAllocation(allocation) {

@@ -9,6 +9,10 @@ import { resolveCardLookups, resolveCardsByOracleIds } from "@/lib/cards/client"
 import { importArchidektCollection } from "@/lib/decks/import-collection";
 import { getRepository } from "@/lib/storage";
 
+/** Matches /api/cards/resolve body limit and keeps upserts modest. */
+const NAME_RESOLVE_BATCH = 200;
+const SAVE_BATCH = 200;
+
 export interface CollectionImportProgress {
   phase: "parse" | "hydrate" | "resolve-names" | "save" | "done";
   message: string;
@@ -74,9 +78,19 @@ export async function importArchidektCollectionCsv(
 
   if (merge.pendingNameResolve.length > 0) {
     report("resolve-names", `Resolving ${merge.pendingNameResolve.length} card(s) by name…`);
-    const { cards, notFound } = await resolveCardLookups(
-      merge.pendingNameResolve.map((entry) => ({ name: entry.name })),
-    );
+    const cards: Card[] = [];
+    const notFound: string[] = [];
+    const pending = merge.pendingNameResolve;
+    for (let i = 0; i < pending.length; i += NAME_RESOLVE_BATCH) {
+      const slice = pending.slice(i, i + NAME_RESOLVE_BATCH);
+      report(
+        "resolve-names",
+        `Resolving names ${Math.min(i + slice.length, pending.length)}/${pending.length}…`,
+      );
+      const result = await resolveCardLookups(slice.map((entry) => ({ name: entry.name })));
+      cards.push(...result.cards);
+      notFound.push(...result.notFound);
+    }
     for (const card of cards) {
       if (!ownedPrintings.has(card.oracleId)) cardsToCache.push(card);
     }
@@ -109,12 +123,26 @@ export async function importArchidektCollectionCsv(
   }
 
   if (cardsToCache.length > 0) {
-    await repo.saveCards(cardsToCache);
+    report("save", `Caching art for ${cardsToCache.length} card(s)…`);
+    for (let i = 0; i < cardsToCache.length; i += SAVE_BATCH) {
+      const chunk = cardsToCache.slice(i, i + SAVE_BATCH);
+      report(
+        "save",
+        `Caching art ${Math.min(i + chunk.length, cardsToCache.length)}/${cardsToCache.length}…`,
+      );
+      await repo.saveCards(chunk);
+    }
   }
 
   if (toAdd.length > 0) {
-    report("save", `Saving ${toAdd.length} card(s) to your collection…`);
-    await repo.setInventoryItems(toAdd);
+    for (let i = 0; i < toAdd.length; i += SAVE_BATCH) {
+      const chunk = toAdd.slice(i, i + SAVE_BATCH);
+      report(
+        "save",
+        `Saving collection ${Math.min(i + chunk.length, toAdd.length)}/${toAdd.length}…`,
+      );
+      await repo.setInventoryItems(chunk);
+    }
   }
 
   report("done", "Import finished.");
