@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Library, Minus, Plus, Upload, WandSparkles } from "lucide-react";
+import { Eye, EyeOff, Library, Minus, Plus, Upload, WandSparkles } from "lucide-react";
 import { CardArt } from "@/components/card-art";
 import { Button, buttonClassName, EmptyState, PageHeader, Panel, StatChip } from "@/components/ui";
 import { classifyCard } from "@/domain/cards/classifier";
@@ -13,6 +13,7 @@ import {
   type Color,
   type InventoryItem,
 } from "@/domain/types";
+import { fetchCardsBySet } from "@/lib/cards/client";
 import {
   importArchidektCollectionCsv,
   type CollectionImportResult,
@@ -20,7 +21,7 @@ import {
 import { usePersistedState } from "@/lib/hooks/use-persisted-state";
 import { useInventory } from "@/lib/hooks/use-repository";
 import { getRepository } from "@/lib/storage";
-import { cardEurPrice, formatCardPrices } from "@/lib/utils";
+import { cardEurPrice, cn, formatCardPrices } from "@/lib/utils";
 
 type CollectionSort = "name" | "quantity" | "price" | "manaValue";
 type ColorFilter = "all" | Color | "C";
@@ -38,6 +39,7 @@ type TypeFilter =
 const SORT_KEY = "mtg-deck-doctor:collection-sort";
 const COLOR_KEY = "mtg-deck-doctor:collection-color";
 const TYPE_KEY = "mtg-deck-doctor:collection-type";
+const SET_KEY = "mtg-deck-doctor:collection-set";
 
 const SORT_OPTIONS: { value: CollectionSort; label: string }[] = [
   { value: "name", label: "Name" },
@@ -105,6 +107,10 @@ function isTypeFilter(value: string): value is TypeFilter {
   );
 }
 
+function isSetFilter(value: string): value is string {
+  return value === "all" || /^[a-z0-9]{3,6}$/.test(value);
+}
+
 function matchesType(card: Card | undefined, filter: TypeFilter): boolean {
   if (filter === "all") return true;
   if (!card) return filter === "other";
@@ -138,6 +144,8 @@ interface CollectionRow {
   item: InventoryItem;
   card: Card | undefined;
   roles: CardRole[];
+  /** True when this tile is a set checklist gap, not an owned inventory row. */
+  missing?: boolean;
 }
 
 export default function CollectionPage() {
@@ -148,10 +156,78 @@ export default function CollectionPage() {
   const [sort, setSort] = usePersistedState(SORT_KEY, "name", isCollectionSort);
   const [colorFilter, setColorFilter] = usePersistedState(COLOR_KEY, "all", isColorFilter);
   const [typeFilter, setTypeFilter] = usePersistedState(TYPE_KEY, "all", isTypeFilter);
+  const [setFilter, setSetFilter] = usePersistedState<string>(SET_KEY, "all", isSetFilter);
+  const [showMissing, setShowMissing] = useState(false);
+  const [setCards, setSetCards] = useState<Card[]>([]);
+  const [loadingSet, setLoadingSet] = useState(false);
+  const [setError, setSetError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [lastImport, setLastImport] = useState<CollectionImportResult | null>(null);
+
+  const ownedOracleIds = useMemo(
+    () => new Set(inventory.map((item) => item.oracleId)),
+    [inventory],
+  );
+
+  const setOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of inventory) {
+      const code = cards.get(item.oracleId)?.setCode?.trim().toLowerCase();
+      if (!code) continue;
+      counts.set(code, (counts.get(code) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([code, ownedCount]) => ({ code, ownedCount }))
+      .sort((a, b) => a.code.localeCompare(b.code));
+  }, [inventory, cards]);
+
+  useEffect(() => {
+    if (setFilter !== "all" && !setOptions.some((opt) => opt.code === setFilter)) {
+      setSetFilter("all");
+      setShowMissing(false);
+    }
+  }, [setFilter, setOptions, setSetFilter]);
+
+  useEffect(() => {
+    if (setFilter === "all") {
+      setShowMissing(false);
+      setSetCards([]);
+      setSetError(null);
+      setLoadingSet(false);
+    }
+  }, [setFilter]);
+
+  useEffect(() => {
+    if (!showMissing || setFilter === "all") {
+      setSetCards([]);
+      setSetError(null);
+      setLoadingSet(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingSet(true);
+    setSetError(null);
+    void fetchCardsBySet(setFilter)
+      .then((cardsInSet) => {
+        if (cancelled) return;
+        setSetCards(cardsInSet);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setSetCards([]);
+        setSetError(err instanceof Error ? err.message : "Could not load that set.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingSet(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showMissing, setFilter]);
 
   const rows = useMemo<CollectionRow[]>(() => {
     return inventory.map((item) => {
@@ -167,6 +243,10 @@ export default function CollectionPage() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const list = rows.filter((row) => {
+      if (setFilter !== "all") {
+        const code = row.card?.setCode?.trim().toLowerCase() ?? "";
+        if (code !== setFilter) return false;
+      }
       if (!matchesColor(row.card, colorFilter)) return false;
       if (!matchesType(row.card, typeFilter)) return false;
       if (roleFilter !== "all" && !row.roles.includes(roleFilter)) return false;
@@ -175,7 +255,27 @@ export default function CollectionPage() {
       return name.toLowerCase().includes(q);
     });
 
+    if (showMissing && setFilter !== "all") {
+      for (const card of setCards) {
+        if (ownedOracleIds.has(card.oracleId)) continue;
+        const roles = classifyCard(card);
+        if (!matchesColor(card, colorFilter)) continue;
+        if (!matchesType(card, typeFilter)) continue;
+        if (roleFilter !== "all" && !roles.includes(roleFilter)) continue;
+        if (q && !card.name.toLowerCase().includes(q)) continue;
+        list.push({
+          item: { oracleId: card.oracleId, quantity: 0 },
+          card,
+          roles,
+          missing: true,
+        });
+      }
+    }
+
     list.sort((a, b) => {
+      if (Boolean(a.missing) !== Boolean(b.missing)) {
+        return a.missing ? 1 : -1;
+      }
       switch (sort) {
         case "quantity":
           return b.item.quantity - a.item.quantity || compareName(a, b);
@@ -196,11 +296,27 @@ export default function CollectionPage() {
     });
 
     return list;
-  }, [rows, query, colorFilter, typeFilter, roleFilter, sort]);
+  }, [
+    rows,
+    query,
+    colorFilter,
+    typeFilter,
+    roleFilter,
+    sort,
+    setFilter,
+    showMissing,
+    setCards,
+    ownedOracleIds,
+  ]);
 
   const totalCopies = useMemo(
     () => inventory.reduce((sum, item) => sum + item.quantity, 0),
     [inventory],
+  );
+
+  const missingCount = useMemo(
+    () => filtered.reduce((sum, row) => sum + (row.missing ? 1 : 0), 0),
+    [filtered],
   );
 
   async function setOwned(oracleId: string, quantity: number) {
@@ -294,10 +410,13 @@ export default function CollectionPage() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatChip label="Unique cards" value={inventory.length} />
         <StatChip label="Total copies" value={totalCopies} />
         <StatChip label="Showing" value={filtered.length} />
+        {showMissing && setFilter !== "all" ? (
+          <StatChip label="Missing in set" value={missingCount} />
+        ) : null}
       </div>
 
       {(importMessage || lastImport) && (
@@ -405,19 +524,69 @@ export default function CollectionPage() {
                   ))}
                 </select>
               </label>
+              <label className="block w-full space-y-1.5 sm:w-48">
+                <span className="text-xs font-medium text-muted">Set</span>
+                <select
+                  className={selectClassName}
+                  value={setFilter}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setSetFilter(next === "all" ? "all" : next.toLowerCase());
+                    if (next === "all") setShowMissing(false);
+                  }}
+                >
+                  <option value="all">All sets</option>
+                  {setOptions.map((opt) => (
+                    <option key={opt.code} value={opt.code}>
+                      {opt.code.toUpperCase()} ({opt.ownedCount})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="flex w-full flex-col gap-1.5 sm:w-auto">
+                <span className="text-xs font-medium text-muted">Checklist</span>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={setFilter === "all" || loadingSet}
+                  onClick={() => setShowMissing((value) => !value)}
+                  className="w-full sm:w-auto"
+                >
+                  {showMissing ? (
+                    <EyeOff className="h-4 w-4" aria-hidden />
+                  ) : (
+                    <Eye className="h-4 w-4" aria-hidden />
+                  )}
+                  {loadingSet
+                    ? "Loading set…"
+                    : showMissing
+                      ? "Hide missing"
+                      : "Show missing"}
+                </Button>
+              </div>
             </div>
+            {setError ? <p className="text-sm text-rose-600">{setError}</p> : null}
+            {showMissing && setFilter !== "all" && !loadingSet && !setError ? (
+              <p className="text-xs text-muted">
+                Gray tiles are cards from {setFilter.toUpperCase()} you do not own yet.
+              </p>
+            ) : null}
           </Panel>
 
           <div>
             {filtered.length === 0 ? (
               <Panel>
-                <p className="py-8 text-center text-sm text-muted">No cards match these filters.</p>
+                <p className="py-8 text-center text-sm text-muted">
+                  {loadingSet
+                    ? "Loading the rest of this set…"
+                    : "No cards match these filters."}
+                </p>
               </Panel>
             ) : (
               <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5">
                 {filtered.map((row) => (
                   <CollectionCardTile
-                    key={row.item.oracleId}
+                    key={`${row.missing ? "missing" : "owned"}-${row.item.oracleId}`}
                     row={row}
                     onQuantityChange={(quantity) => void setOwned(row.item.oracleId, quantity)}
                   />
@@ -452,10 +621,16 @@ function CollectionCardTile({
   const name = row.card?.name ?? "Unknown card";
   const price = formatCardPrices(row.card?.prices);
   const roleLabel = row.roles[0] ? CARD_ROLE_LABELS[row.roles[0]] : null;
+  const missing = Boolean(row.missing);
 
   return (
-    <li className="min-w-0">
-      <div className="relative overflow-hidden rounded-xl shadow-md ring-1 ring-black/5 dark:ring-white/10">
+    <li className={cn("min-w-0", missing && "opacity-40")}>
+      <div
+        className={cn(
+          "relative overflow-hidden rounded-xl shadow-md ring-1 ring-black/5 dark:ring-white/10",
+          missing && "grayscale",
+        )}
+      >
         <CardArt
           name={name}
           imageUri={row.card?.imageUri}
@@ -463,38 +638,50 @@ function CollectionCardTile({
           size="fill"
           className="block w-full"
         />
-        <span
-          className="pointer-events-none absolute right-1.5 top-1.5 z-10 rounded-md bg-black/80 px-1.5 py-0.5 text-xs font-semibold tabular-nums text-white shadow-sm"
-          aria-label={`Quantity ${row.item.quantity}`}
-        >
-          ×{row.item.quantity}
-        </span>
+        {missing ? (
+          <span className="pointer-events-none absolute right-1.5 top-1.5 z-10 rounded-md bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white/90 shadow-sm">
+            Missing
+          </span>
+        ) : (
+          <span
+            className="pointer-events-none absolute right-1.5 top-1.5 z-10 rounded-md bg-black/80 px-1.5 py-0.5 text-xs font-semibold tabular-nums text-white shadow-sm"
+            aria-label={`Quantity ${row.item.quantity}`}
+          >
+            ×{row.item.quantity}
+          </span>
+        )}
       </div>
 
-      <div
-        className="mt-1.5 flex items-center justify-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--card)] p-1"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <button
-          type="button"
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink transition hover:bg-black/5 dark:hover:bg-white/10"
-          aria-label={`Decrease ${name}`}
-          onClick={() => onQuantityChange(Math.max(0, row.item.quantity - 1))}
+      {missing ? (
+        <div className="mt-1.5 rounded-lg border border-dashed border-[var(--border)] bg-[var(--card)] px-2 py-2 text-center text-[11px] font-medium text-muted">
+          Not in collection
+        </div>
+      ) : (
+        <div
+          className="mt-1.5 flex items-center justify-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--card)] p-1"
+          onClick={(event) => event.stopPropagation()}
         >
-          <Minus className="h-4 w-4" aria-hidden />
-        </button>
-        <span className="min-w-[1.5rem] text-center text-sm font-semibold tabular-nums text-ink">
-          {row.item.quantity}
-        </span>
-        <button
-          type="button"
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink transition hover:bg-black/5 dark:hover:bg-white/10"
-          aria-label={`Increase ${name}`}
-          onClick={() => onQuantityChange(row.item.quantity + 1)}
-        >
-          <Plus className="h-4 w-4" aria-hidden />
-        </button>
-      </div>
+          <button
+            type="button"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink transition hover:bg-black/5 dark:hover:bg-white/10"
+            aria-label={`Decrease ${name}`}
+            onClick={() => onQuantityChange(Math.max(0, row.item.quantity - 1))}
+          >
+            <Minus className="h-4 w-4" aria-hidden />
+          </button>
+          <span className="min-w-[1.5rem] text-center text-sm font-semibold tabular-nums text-ink">
+            {row.item.quantity}
+          </span>
+          <button
+            type="button"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink transition hover:bg-black/5 dark:hover:bg-white/10"
+            aria-label={`Increase ${name}`}
+            onClick={() => onQuantityChange(row.item.quantity + 1)}
+          >
+            <Plus className="h-4 w-4" aria-hidden />
+          </button>
+        </div>
+      )}
 
       <div className="mt-1.5 space-y-0.5 px-0.5">
         <div className="truncate text-sm font-medium leading-snug text-ink" title={name}>

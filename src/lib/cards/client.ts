@@ -41,13 +41,28 @@ export async function searchCards(query: string): Promise<Card[]> {
   return data.cards;
 }
 
-const BY_ORACLE_BATCH = 400;
+export async function fetchCardsBySet(setCode: string): Promise<Card[]> {
+  const params = new URLSearchParams({ set: setCode.trim().toLowerCase() });
+  const response = await fetch(`/api/cards/by-set?${params}`);
+  const data = (await response.json()) as SearchResponse;
+  if (!response.ok) {
+    throw new Error(data.error ?? "Could not load that set.");
+  }
+  return data.cards;
+}
+
+/**
+ * Keep each serverless invocation short: Scryfall allows 75 ids per collection
+ * call and only 2 calls/sec, so two batches (~1.5s+) already stress Netlify's
+ * default function budget when the route also does retries.
+ */
+const SERVER_CARD_BATCH = 150;
 
 export async function resolveCardsByScryfallIds(scryfallIds: string[]): Promise<Card[]> {
   if (scryfallIds.length === 0) return [];
   const cards: Card[] = [];
-  for (let index = 0; index < scryfallIds.length; index += 400) {
-    const slice = scryfallIds.slice(index, index + 400);
+  for (let index = 0; index < scryfallIds.length; index += SERVER_CARD_BATCH) {
+    const slice = scryfallIds.slice(index, index + SERVER_CARD_BATCH);
     const response = await fetch("/api/cards/by-scryfall", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -67,8 +82,8 @@ export async function resolveCardsByOracleIds(oracleIds: string[]): Promise<Card
   const unique = [...new Set(oracleIds.filter((id) => id.trim().length > 0))];
   const cards: Card[] = [];
 
-  for (let i = 0; i < unique.length; i += BY_ORACLE_BATCH) {
-    const batch = unique.slice(i, i + BY_ORACLE_BATCH);
+  for (let i = 0; i < unique.length; i += SERVER_CARD_BATCH) {
+    const batch = unique.slice(i, i + SERVER_CARD_BATCH);
     const response = await fetch("/api/cards/by-oracle", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

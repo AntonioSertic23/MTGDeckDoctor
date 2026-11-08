@@ -15,7 +15,14 @@ import type { CardLookup, CardProvider } from "@/lib/cards/provider";
  */
 const API = "https://api.scryfall.com";
 const COLLECTION_BATCH_SIZE = 75;
-const REQUEST_SPACING_MS = 100;
+/**
+ * Scryfall caps /cards/collection, /cards/named, and /cards/search at 2/sec.
+ * A shared 550ms floor keeps us under that for every endpoint we call.
+ * @see https://scryfall.com/docs/api/rate-limits
+ */
+const REQUEST_SPACING_MS = 550;
+const RATE_LIMIT_COOLDOWN_MS = 30_000;
+const MAX_RETRIES = 2;
 const CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const CACHE_MAX_ENTRIES = 5000;
 
@@ -29,6 +36,7 @@ const byName = new Map<string, string>();
 const byScryfallId = new Map<string, CacheEntry>();
 /** Printing cache stores the card itself. Oracle id is shared by every printing. */
 const byPrinting = new Map<string, CacheEntry>();
+const bySetCode = new Map<string, { cards: Card[]; storedAt: number }>();
 
 let lastRequestAt = 0;
 
@@ -141,32 +149,87 @@ async function fetchNamed(name: string): Promise<Card | null> {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  await throttle();
-  const hasBody = Boolean(init?.body);
-  const response = await fetch(`${API}${path}`, {
-    ...init,
-    headers: {
-      Accept: "application/json",
-      "User-Agent": "MTGDeckDoctor/0.1 (https://github.com/mtg-deck-doctor)",
-      ...(hasBody ? { "Content-Type": "application/json" } : {}),
-      ...init?.headers,
-    },
-    // Collection lookups are POSTs. Caching them by URL would reuse another
-    // batch's printings and store the wrong edition.
-    ...(hasBody ? { cache: "no-store" as const } : { next: { revalidate: 60 * 60 * 24 } }),
-  });
+function retryAfterMs(response: Response): number {
+  const header = response.headers.get("retry-after");
+  if (!header) return RATE_LIMIT_COOLDOWN_MS;
+  const asNumber = Number(header);
+  if (Number.isFinite(asNumber) && asNumber >= 0) {
+    return Math.min(Math.max(asNumber * 1000, REQUEST_SPACING_MS), RATE_LIMIT_COOLDOWN_MS);
+  }
+  const asDate = Date.parse(header);
+  if (!Number.isNaN(asDate)) {
+    return Math.min(Math.max(asDate - Date.now(), REQUEST_SPACING_MS), RATE_LIMIT_COOLDOWN_MS);
+  }
+  return RATE_LIMIT_COOLDOWN_MS;
+}
 
-  if (!response.ok) {
+async function request<T>(pathOrUrl: string, init?: RequestInit): Promise<T> {
+  const hasBody = Boolean(init?.body);
+  const url = pathOrUrl.startsWith("http") ? pathOrUrl : `${API}${pathOrUrl}`;
+  const headers = {
+    Accept: "application/json;q=0.9,*/*;q=0.8",
+    "User-Agent": "MTGDeckDoctor/0.1 (https://github.com/AntonioSertic23/MTGDeckDoctor)",
+    ...(hasBody ? { "Content-Type": "application/json" } : {}),
+    ...init?.headers,
+  };
+
+  let attempt = 0;
+  while (true) {
+    await throttle();
+    const response = await fetch(url, {
+      ...init,
+      headers,
+      // Collection lookups are POSTs. Caching them by URL would reuse another
+      // batch's printings and store the wrong edition.
+      ...(hasBody ? { cache: "no-store" as const } : { next: { revalidate: 60 * 60 * 24 } }),
+    });
+
+    if (response.ok) {
+      return (await response.json()) as T;
+    }
+
     const body = await response.text().catch(() => "");
+    const retryable = response.status === 429 || response.status >= 500;
+    if (retryable && attempt < MAX_RETRIES) {
+      attempt += 1;
+      const wait =
+        response.status === 429 ? retryAfterMs(response) : REQUEST_SPACING_MS * (attempt + 1);
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      lastRequestAt = Date.now();
+      continue;
+    }
+
     throw new ScryfallError(
       `Scryfall request failed (${response.status})`,
       response.status,
       body.slice(0, 500),
     );
   }
+}
 
-  return (await response.json()) as T;
+interface ScryfallSearchPage {
+  data: ScryfallCard[];
+  has_more: boolean;
+  next_page?: string;
+}
+
+async function searchAllPages(query: string, unique: string, order: string): Promise<Card[]> {
+  const params = new URLSearchParams({ q: query, unique, order });
+  let next: string | null = `/cards/search?${params}`;
+  const cards: Card[] = [];
+
+  while (next) {
+    const page: ScryfallSearchPage = await request<ScryfallSearchPage>(next);
+    for (const raw of page.data) {
+      const card = mapScryfallCard(raw);
+      cacheCard(card);
+      rememberPrinting(card);
+      cards.push(card);
+    }
+    next = page.has_more && page.next_page ? page.next_page : null;
+  }
+
+  return cards;
 }
 
 export class ScryfallError extends Error {
@@ -451,6 +514,30 @@ export const scryfallProvider: CardProvider = {
       return cards;
     } catch (error) {
       if (error instanceof ScryfallError && error.status === 404) return [];
+      throw error;
+    }
+  },
+
+  async listBySet(setCode) {
+    const code = setCode.trim().toLowerCase();
+    if (!/^[a-z0-9]{3,6}$/.test(code)) return [];
+
+    const cached = bySetCode.get(code);
+    if (cached && Date.now() - cached.storedAt <= CACHE_TTL_MS) {
+      return cached.cards;
+    }
+
+    try {
+      // One row per oracle card in the set; excludes tokens / art cards for a
+      // usable binder checklist against oracle-level inventory.
+      const cards = await searchAllPages(`e:${code} -is:token -is:art_series`, "cards", "set");
+      bySetCode.set(code, { cards, storedAt: Date.now() });
+      return cards;
+    } catch (error) {
+      if (error instanceof ScryfallError && error.status === 404) {
+        bySetCode.set(code, { cards: [], storedAt: Date.now() });
+        return [];
+      }
       throw error;
     }
   },
