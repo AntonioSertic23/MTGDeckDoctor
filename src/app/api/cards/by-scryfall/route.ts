@@ -2,6 +2,9 @@ import { z } from "zod";
 import { scryfallProvider } from "@/lib/cards/scryfall";
 import { cardProviderErrorResponse } from "@/lib/api/errors";
 
+/** Netlify / serverless budget for Scryfall collection batches + possible 429 waits. */
+export const maxDuration = 60;
+
 const bodySchema = z.object({
   scryfallIds: z.array(z.string().uuid()).min(1).max(500),
 });

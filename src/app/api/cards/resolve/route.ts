@@ -2,6 +2,8 @@ import { z } from "zod";
 import { scryfallProvider } from "@/lib/cards/scryfall";
 import { cardProviderErrorResponse } from "@/lib/api/errors";
 
+export const maxDuration = 60;
+
 const lookupSchema = z.object({
   name: z.string().min(1),
   setCode: z.string().min(1).optional(),
