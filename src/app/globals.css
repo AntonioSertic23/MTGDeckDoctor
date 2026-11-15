@@ -13,7 +13,15 @@
   --font-display: var(--font-display), Fraunces, ui-serif, Georgia, serif;
 }
 
+/*
+ * Theme: an inline script in layout.tsx sets data-theme="light|dark" on <html>
+ * before first paint (saved choice, or the system setting). The media query is
+ * the fallback for the instant before that script runs.
+ */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 :root {
+  color-scheme: light;
   --background: #eef2f4;
   --card: #ffffff;
   --ink: #0b1220;
@@ -22,10 +30,18 @@
   --accent: #0c7a66;
   --accent-strong: #086554;
   --foreground: var(--ink);
+  /* MTG colour pips — tuned to read on both surfaces. */
+  --mana-w: #b8902a;
+  --mana-u: #2a6fb5;
+  --mana-b: #7a5a90;
+  --mana-r: #c8402b;
+  --mana-g: #2d8a4a;
+  --mana-c: #8a96a0;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --background: #0a0f14;
     --card: #151c24;
     --ink: #f4f7fa;
@@ -34,7 +50,31 @@
     --accent: #3dceb0;
     --accent-strong: #7aebcf;
     --foreground: var(--ink);
+    --mana-w: #e8dcae;
+    --mana-u: #5aa9e6;
+    --mana-b: #9b92a3;
+    --mana-r: #f0705a;
+    --mana-g: #4fbf76;
+    --mana-c: #b7c1c9;
   }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #0a0f14;
+  --card: #151c24;
+  --ink: #f4f7fa;
+  --muted: #a8b6c4;
+  --border: #2a3540;
+  --accent: #3dceb0;
+  --accent-strong: #7aebcf;
+  --foreground: var(--ink);
+  --mana-w: #d9b85a;
+  --mana-u: #5aa0e0;
+  --mana-b: #a98bc0;
+  --mana-r: #ec6a52;
+  --mana-g: #48b06c;
+  --mana-c: #9aa6b0;
 }
 
 @layer base {

@@ -1,25 +1,31 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
-import type { LocalAnalysis } from "@/lib/decks/analyze-local";
-import { deckContentKey, getCachedOrAnalyzeDeck } from "@/lib/decks/analyze-local";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useMemo, useTransition } from "react";
+import { deckContentKey } from "@/lib/decks/analyze-local";
 import { useDeck, useDecksWithCards } from "@/lib/hooks/use-repository";
-import { usePersistedState } from "@/lib/hooks/use-persisted-state";
+import { useDeckAnalysis } from "@/lib/hooks/use-deck-analysis";
 import { getRepository } from "@/lib/storage";
 import { buildSharedCardIndex, findSharedCards } from "@/domain/sharing/shared-cards";
-import type { Color, Deck, DeckWithCards, ResolvedDeckEntry } from "@/domain/types";
-import { CARD_ROLE_LABELS } from "@/domain/types";
+import type { Deck } from "@/domain/types";
 import { HealthMeter } from "@/components/health-meter";
 import { ProblemList, type CardVisual } from "@/components/problem-list";
-import { AdditionList, CutList } from "@/components/recommendation-lists";
+import { CutList } from "@/components/recommendation-lists";
 import { SharedCardList } from "@/components/shared-card-list";
-import { Button, buttonClassName, PageHeader, Panel, StatChip } from "@/components/ui";
-import { CardArt } from "@/components/card-art";
+import { buttonClassName, PageHeader, Panel, SectionTitle, Skeleton } from "@/components/ui";
 import { CommanderPanel } from "@/components/commander-panel";
+import { useDialog } from "@/components/dialog";
+import { useToast } from "@/components/toast";
+import { AdditionsTab } from "@/components/deck/additions-tab";
+import { CardsTab } from "@/components/deck/cards-tab";
+import { DeckActions } from "@/components/deck/deck-actions";
+import { ExplainTab } from "@/components/deck/explain-tab";
+import { HealthHistoryChart } from "@/components/deck/health-history";
+import { NotesTab } from "@/components/deck/notes-tab";
+import { OverviewTab } from "@/components/deck/overview-tab";
 import { copyDeckToArchidektClipboard, exportDecksToFile } from "@/lib/decks/file-io";
-import { cardEurPrice, cn, formatCardPrices } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 const TABS = [
   { id: "overview", label: "Overview" },
@@ -35,145 +41,26 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
-type CardSort = "name" | "manaValue" | "type" | "color" | "price" | "quantity";
-
-const CARD_SORT_KEY = "mtg-deck-doctor:deck-cards-sort";
-
-const CARD_SORT_OPTIONS: { value: CardSort; label: string }[] = [
-  { value: "name", label: "Name" },
-  { value: "manaValue", label: "Mana value" },
-  { value: "type", label: "Type" },
-  { value: "color", label: "Color" },
-  { value: "price", label: "Price (EUR)" },
-  { value: "quantity", label: "Quantity" },
-];
-
-const COLOR_RANK: Record<Color, number> = { W: 0, U: 1, B: 2, R: 3, G: 4 };
-
-const TYPE_RANK = [
-  "creature",
-  "planeswalker",
-  "instant",
-  "sorcery",
-  "artifact",
-  "enchantment",
-  "battle",
-  "land",
-] as const;
-
-function isCardSort(value: string): value is CardSort {
-  return CARD_SORT_OPTIONS.some((opt) => opt.value === value);
+function isTabId(value: string | null): value is TabId {
+  return TABS.some((item) => item.id === value);
 }
-
-function primaryType(typeLine: string): string {
-  const lower = typeLine.toLowerCase();
-  for (const type of TYPE_RANK) {
-    if (lower.includes(type)) return type;
-  }
-  return "other";
-}
-
-function colorSortKey(colors: Color[]): string {
-  if (colors.length === 0) return "99";
-  return `${String(colors.length).padStart(2, "0")}-${[...colors]
-    .sort((a, b) => COLOR_RANK[a] - COLOR_RANK[b])
-    .join("")}`;
-}
-
-function compareName(a: ResolvedDeckEntry, b: ResolvedDeckEntry): number {
-  return a.card.name.localeCompare(b.card.name, undefined, { sensitivity: "base" });
-}
-
-function sortDeckEntries(entries: ResolvedDeckEntry[], sort: CardSort): ResolvedDeckEntry[] {
-  const copy = [...entries];
-  copy.sort((a, b) => {
-    // Commanders stay at the top regardless of sort.
-    if (a.isCommander !== b.isCommander) return a.isCommander ? -1 : 1;
-
-    switch (sort) {
-      case "manaValue": {
-        const byMv = a.card.manaValue - b.card.manaValue;
-        return byMv !== 0 ? byMv : compareName(a, b);
-      }
-      case "type": {
-        const byType = primaryType(a.card.typeLine).localeCompare(primaryType(b.card.typeLine));
-        return byType !== 0 ? byType : compareName(a, b);
-      }
-      case "color": {
-        const byColor = colorSortKey(a.card.colorIdentity).localeCompare(
-          colorSortKey(b.card.colorIdentity),
-        );
-        return byColor !== 0 ? byColor : compareName(a, b);
-      }
-      case "price": {
-        const pa = cardEurPrice(a.card) ?? -1;
-        const pb = cardEurPrice(b.card) ?? -1;
-        return pb - pa || compareName(a, b);
-      }
-      case "quantity": {
-        const byQty = b.quantity - a.quantity;
-        return byQty !== 0 ? byQty : compareName(a, b);
-      }
-      case "name":
-      default:
-        return compareName(a, b);
-    }
-  });
-  return copy;
-}
-
-const selectClassName =
-  "w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2.5 text-sm outline-none ring-accent focus:ring-2";
 
 export default function DeckDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const dialog = useDialog();
+  const toast = useToast();
+
+  const tabParam = searchParams.get("tab");
+  const tab: TabId = isTabId(tabParam) ? tabParam : "overview";
+
   const { deck, loading, error, refresh } = useDeck(params.id);
-  const [tab, setTab] = useState<TabId>("overview");
+  const { analysis, error: analyzeError, setError, reanalyze, cardsPending } = useDeckAnalysis(deck);
   const { decks, cards, inventory, loading: sharedLoading } = useDecksWithCards(tab === "shared");
-  const [analysis, setAnalysis] = useState<LocalAnalysis | null>(null);
-  const [analyzeError, setAnalyzeError] = useState<string | null>(null);
-  const [notesDraft, setNotesDraft] = useState("");
-  const [cardSort, setCardSort] = usePersistedState(CARD_SORT_KEY, "name", isCardSort);
   const [deleting, startDelete] = useTransition();
   const [busy, startBusy] = useTransition();
-  const [archidektCopied, setArchidektCopied] = useState(false);
-
-  useEffect(() => {
-    setNotesDraft(deck?.deck.description ?? "");
-  }, [deck?.deck.id, deck?.deck.description]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function run() {
-      if (!deck) return;
-      const preview = previewFromSnapshot(deck);
-      setAnalysis((current) => {
-        if (
-          current?.resolved.deck.id === deck.deck.id &&
-          current.resolved.entries.length > 0
-        ) {
-          return current;
-        }
-        return preview;
-      });
-      try {
-        setAnalyzeError(null);
-        const result = await getCachedOrAnalyzeDeck(deck);
-        if (!cancelled) setAnalysis(result);
-      } catch (err) {
-        if (!cancelled) {
-          setAnalyzeError(err instanceof Error ? err.message : "Analysis failed.");
-        }
-      }
-    }
-
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [deck]);
 
   const sharedForDeck = useMemo(() => {
     if (!deck) return [];
@@ -181,21 +68,13 @@ export default function DeckDetailPage() {
     return findSharedCards(usage).filter((u) => u.deckIds.includes(deck.deck.id));
   }, [deck, decks, cards, inventory]);
 
-  const sortedCards = useMemo(() => {
-    if (!analysis) return [];
-    return sortDeckEntries(analysis.resolved.entries, cardSort);
-  }, [analysis, cardSort]);
-
   const artByName = useMemo(() => {
     const map = new Map<string, CardVisual>();
     if (!analysis) return map;
     for (const entry of analysis.resolved.entries) {
       const visual: CardVisual = { imageUri: entry.card.imageUri, prices: entry.card.prices };
       map.set(entry.card.name.toLowerCase(), visual);
-      map.set(
-        (entry.card.name.split("//")[0] ?? entry.card.name).trim().toLowerCase(),
-        visual,
-      );
+      map.set((entry.card.name.split("//")[0] ?? entry.card.name).trim().toLowerCase(), visual);
     }
     for (const addition of analysis.additions) {
       map.set(addition.name.toLowerCase(), {
@@ -206,7 +85,15 @@ export default function DeckDetailPage() {
     return map;
   }, [analysis]);
 
-  if (loading) return <p className="text-sm text-muted">Loading deck…</p>;
+  function setTab(next: TabId) {
+    const query = new URLSearchParams(searchParams.toString());
+    if (next === "overview") query.delete("tab");
+    else query.set("tab", next);
+    const qs = query.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }
+
+  if (loading) return <DeckPageSkeleton />;
   if (error) return <p className="text-sm text-rose-600">{error}</p>;
   if (!deck) {
     return (
@@ -219,20 +106,53 @@ export default function DeckDetailPage() {
     );
   }
 
-  const cardsPending = Boolean(
-    analysis && deck && analysis.resolved.entries.length === 0 && deck.cards.length > 0,
-  );
-  const stats = analysis?.analysis.statistics;
   const commanders = analysis?.resolved.commanders ?? [];
   const commanderNames = commanders.map((c) => c.name).join(" / ");
+  const actionsDisabled = deleting || busy;
 
-  function deleteDeck() {
+  function patchDeck(patch: Partial<Deck>, success?: string) {
     if (!deck) return;
-    if (!window.confirm(`Delete “${deck.deck.name}”?`)) return;
-    startDelete(async () => {
-      await getRepository().deleteDeck(deck.deck.id);
-      router.push("/decks");
+    startBusy(async () => {
+      try {
+        await getRepository().updateDeck({ ...deck.deck, ...patch });
+        await refresh();
+        if (success) toast(success);
+      } catch (err) {
+        toast(err instanceof Error ? err.message : "Could not save the deck.", { tone: "error" });
+      }
     });
+  }
+
+  async function deleteDeck() {
+    if (!deck) return;
+    const ok = await dialog.confirm({
+      title: `Delete “${deck.deck.name}”?`,
+      description: "The list, notes and diagnosis are removed. Your collection is not touched.",
+      confirmLabel: "Delete deck",
+      danger: true,
+    });
+    if (!ok) return;
+    startDelete(async () => {
+      try {
+        await getRepository().deleteDeck(deck.deck.id);
+        toast(`Deleted “${deck.deck.name}”.`);
+        router.push("/decks");
+      } catch (err) {
+        toast(err instanceof Error ? err.message : "Could not delete the deck.", { tone: "error" });
+      }
+    });
+  }
+
+  async function renameDeck() {
+    if (!deck) return;
+    const next = await dialog.prompt({
+      title: "Rename deck",
+      label: "Deck name",
+      defaultValue: deck.deck.name,
+      confirmLabel: "Rename",
+    });
+    if (!next || next === deck.deck.name) return;
+    patchDeck({ name: next }, "Deck renamed.");
   }
 
   function exportDeckJson() {
@@ -247,63 +167,52 @@ export default function DeckDetailPage() {
     startBusy(async () => {
       try {
         await copyDeckToArchidektClipboard(deck.deck.id);
-        setArchidektCopied(true);
-        window.setTimeout(() => setArchidektCopied(false), 2000);
+        toast("Decklist copied — paste it into Archidekt.");
       } catch (err) {
-        setAnalyzeError(err instanceof Error ? err.message : "Could not copy decklist.");
+        toast(err instanceof Error ? err.message : "Could not copy decklist.", { tone: "error" });
       }
     });
   }
 
-  async function renameDeck() {
-    if (!deck) return;
-    const next = window.prompt("Deck name", deck.deck.name);
-    if (!next || next.trim() === deck.deck.name) return;
-    await getRepository().updateDeck({ ...deck.deck, name: next.trim() });
-    await refresh();
+  function runReanalyze() {
+    startBusy(async () => {
+      try {
+        await reanalyze();
+        await refresh();
+        toast("Diagnosis updated.");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Analysis failed.");
+      }
+    });
   }
 
   function setCommanders(oracleIds: string[]) {
     if (!deck) return;
-    startBusy(async () => {
-      const commanderOracleIds = [...new Set(oracleIds.filter(Boolean))].slice(0, 2);
-      const primaryName = analysis?.resolved.entries.find(
-        (e) => e.card.oracleId === commanderOracleIds[0],
-      )?.card.name;
-      await getRepository().updateDeck({
-        ...deck.deck,
-        commanderOracleIds,
-        name:
-          commanderOracleIds.length === 0 || deck.deck.name !== "Untitled deck"
-            ? deck.deck.name
-            : (primaryName ?? deck.deck.name),
-      });
-      await refresh();
+    const commanderOracleIds = [...new Set(oracleIds.filter(Boolean))].slice(0, 2);
+    const primaryName = analysis?.resolved.entries.find(
+      (e) => e.card.oracleId === commanderOracleIds[0],
+    )?.card.name;
+    patchDeck({
+      commanderOracleIds,
+      name:
+        commanderOracleIds.length === 0 || deck.deck.name !== "Untitled deck"
+          ? deck.deck.name
+          : (primaryName ?? deck.deck.name),
     });
   }
 
-  function patchDeck(patch: Partial<Deck>) {
+  async function saveNotes(notes: string) {
     if (!deck) return;
-    startBusy(async () => {
-      await getRepository().updateDeck({ ...deck.deck, ...patch });
+    try {
+      await getRepository().updateDeck({ ...deck.deck, description: notes || undefined });
       await refresh();
-    });
+      toast(notes ? "Notes saved." : "Notes cleared.");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not save notes.", { tone: "error" });
+    }
   }
 
-  const savedNotes = deck.deck.description ?? "";
-  const notesDirty = notesDraft !== savedNotes;
-
-  function saveNotes() {
-    const next = notesDraft.trim();
-    patchDeck({ description: next || undefined });
-  }
-
-  function clearNotes() {
-    if (!savedNotes && !notesDraft.trim()) return;
-    if (!window.confirm("Clear notes for this deck?")) return;
-    setNotesDraft("");
-    patchDeck({ description: undefined });
-  }
+  const history = deck.deck.analysisSnapshot?.history ?? [];
 
   return (
     <div className="space-y-5">
@@ -317,54 +226,23 @@ export default function DeckDetailPage() {
             : "Commander deck · commander not set yet — analysis quality will be limited."
         }
         actions={
-          <>
-            <button
-              type="button"
-              disabled={deleting || busy}
-              onClick={() => patchDeck({ ready: !deck.deck.ready })}
-              className={cn(
-                buttonClassName(deck.deck.ready ? "primary" : "secondary"),
-                deck.deck.ready &&
-                  "border-emerald-600 bg-emerald-600 hover:bg-emerald-700 dark:border-emerald-500 dark:bg-emerald-600 dark:hover:bg-emerald-500",
-              )}
-            >
-              {deck.deck.ready ? "Ready to play" : "Mark as ready"}
-            </button>
-            <Link href={`/decks/new?replace=${deck.deck.id}`} className={buttonClassName("secondary")}>
-              Replace list
-            </Link>
-            <Button variant="secondary" onClick={renameDeck} disabled={deleting || busy}>
-              Rename
-            </Button>
-            <Button variant="secondary" onClick={copyArchidekt} disabled={deleting || busy}>
-              {archidektCopied ? "Copied!" : "Copy for Archidekt"}
-            </Button>
-            <Button variant="secondary" onClick={exportDeckJson} disabled={deleting || busy}>
-              Export JSON
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                if (!deck) return;
-                startBusy(async () => {
-                  try {
-                    setAnalyzeError(null);
-                    const result = await getCachedOrAnalyzeDeck(deck, { force: true });
-                    setAnalysis(result);
-                    await refresh();
-                  } catch (err) {
-                    setAnalyzeError(err instanceof Error ? err.message : "Analysis failed.");
-                  }
-                });
-              }}
-              disabled={deleting || busy}
-            >
-              Re-analyze
-            </Button>
-            <Button variant="danger" onClick={deleteDeck} disabled={deleting || busy}>
-              Delete
-            </Button>
-          </>
+          <DeckActions
+            deckId={deck.deck.id}
+            ready={deck.deck.ready}
+            disabled={actionsDisabled}
+            onToggleReady={() =>
+              patchDeck(
+                { ready: !deck.deck.ready },
+                deck.deck.ready ? "Marked as not ready." : "Marked as ready to play.",
+              )
+            }
+            onCopyArchidekt={copyArchidekt}
+            onRename={() => void renameDeck()}
+            onCompare={() => router.push(`/decks/compare?a=${deck.deck.id}`)}
+            onExport={exportDeckJson}
+            onReanalyze={runReanalyze}
+            onDelete={() => void deleteDeck()}
+          />
         }
       />
 
@@ -390,7 +268,11 @@ export default function DeckDetailPage() {
       ) : null}
 
       <div className="-mx-4 overflow-x-auto px-4 scrollbar-none sm:mx-0 sm:px-0">
-        <div className="flex min-w-max gap-1 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-1">
+        <div
+          role="tablist"
+          aria-label="Deck sections"
+          className="flex min-w-max gap-1 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-1"
+        >
           {TABS.map((item) => (
             <button
               key={item.id}
@@ -401,7 +283,7 @@ export default function DeckDetailPage() {
               className={cn(
                 "rounded-xl px-3 py-2 text-sm font-medium transition",
                 tab === item.id
-                  ? "bg-accent text-white"
+                  ? "bg-accent text-white dark:text-[var(--background)]"
                   : "text-muted hover:bg-black/[0.04] hover:text-ink dark:hover:bg-white/[0.05]",
               )}
             >
@@ -412,43 +294,37 @@ export default function DeckDetailPage() {
       </div>
 
       {tab === "notes" ? (
-        <Panel className="space-y-3">
-          <div>
-            <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold">Notes</h2>
-            <p className="mt-1 text-sm text-muted">
-              Strategy, upgrades, playtest reminders — anything useful for this list.
-            </p>
-          </div>
-          <textarea
-            value={notesDraft}
-            onChange={(e) => setNotesDraft(e.target.value)}
-            rows={16}
-            placeholder="Add notes for this deck…"
-            disabled={busy || deleting}
-            className="w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2.5 text-sm leading-relaxed outline-none ring-accent focus:ring-2 disabled:opacity-60"
-          />
-          <div className="flex flex-wrap gap-2">
-            <Button variant="primary" disabled={busy || deleting || !notesDirty} onClick={saveNotes}>
-              Save notes
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={busy || deleting || (!savedNotes && !notesDraft.trim())}
-              onClick={clearNotes}
-            >
-              Clear
-            </Button>
-          </div>
-        </Panel>
+        <NotesTab
+          key={`${deck.deck.id}:${deck.deck.description ?? ""}`}
+          savedNotes={deck.deck.description ?? ""}
+          disabled={actionsDisabled}
+          onSave={saveNotes}
+        />
       ) : !analysis ? (
-        <p className="text-sm text-muted">
-          {deck.deck.analysisSnapshot?.contentKey === deckContentKey(deck)
-            ? "Loading cards…"
-            : "Running diagnosis…"}
-        </p>
+        <div className="space-y-3" aria-busy>
+          <p className="text-sm text-muted">
+            {deck.deck.analysisSnapshot?.contentKey === deckContentKey(deck)
+              ? "Loading cards…"
+              : "Running diagnosis…"}
+          </p>
+          <Skeleton className="h-28" />
+          <div className="grid gap-4 md:grid-cols-2">
+            <Skeleton className="h-48" />
+            <Skeleton className="h-48" />
+          </div>
+        </div>
       ) : (
         <>
           {tab === "overview" ? (
+            <OverviewTab
+              analysis={analysis}
+              cardsPending={cardsPending}
+              artByName={artByName}
+              onShowHealth={() => setTab("health")}
+            />
+          ) : null}
+
+          {tab === "health" ? (
             <div className="space-y-4">
               <Panel>
                 <HealthMeter
@@ -456,201 +332,82 @@ export default function DeckDetailPage() {
                   suggestionsByCategory={analysis.healthSuggestions}
                 />
               </Panel>
-              {stats ? (
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <StatChip label="Cards" value={stats.totalCards} />
-                  <StatChip label="Lands" value={stats.landCount} />
-                  <StatChip label="Avg MV" value={stats.averageManaValue} />
-                  <StatChip label="Problems" value={analysis.analysis.problems.length} />
-                </div>
-              ) : null}
               <Panel>
-                <h2 className="mb-3 font-[family-name:var(--font-display)] text-lg font-semibold">
-                  Top problems
-                </h2>
-                <ProblemList
-                  problems={analysis.analysis.problems.slice(0, 3)}
-                  artByName={artByName}
-                />
+                <HealthHistoryChart history={history} />
               </Panel>
             </div>
           ) : null}
 
-          {tab === "health" ? (
-            <Panel>
-              <HealthMeter
-                health={analysis.analysis.health}
-                suggestionsByCategory={analysis.healthSuggestions}
-              />
-            </Panel>
-          ) : null}
-
           {tab === "problems" ? (
             <Panel>
-              <h2 className="mb-4 font-[family-name:var(--font-display)] text-xl font-semibold">Problems</h2>
+              <SectionTitle className="mb-4">Problems</SectionTitle>
               <ProblemList problems={analysis.analysis.problems} artByName={artByName} />
             </Panel>
           ) : null}
 
           {tab === "cuts" ? (
             <Panel>
-              <h2 className="mb-1 font-[family-name:var(--font-display)] text-xl font-semibold">
+              <SectionTitle
+                className="mb-4"
+                description="Strongest candidates to consider cutting — not automatic removals."
+              >
                 Suggested cuts
-              </h2>
-              <p className="mb-4 text-sm text-muted">
-                Strongest candidates to consider cutting — not automatic removals.
-              </p>
+              </SectionTitle>
               <CutList cuts={analysis.analysis.cuts} />
             </Panel>
           ) : null}
 
-          {tab === "additions" ? (
-            <Panel>
-              <h2 className="mb-1 font-[family-name:var(--font-display)] text-xl font-semibold">
-                Suggested additions
-              </h2>
-              <p className="mb-4 text-sm text-muted">
-                Ranked from role gaps and theme fit. Cards you already own are listed first.
-              </p>
-              <AdditionList additions={analysis.additions} />
-            </Panel>
-          ) : null}
+          {tab === "additions" ? <AdditionsTab additions={analysis.additions} /> : null}
 
-          {tab === "explain" ? (
-            <Panel className="space-y-4">
-              <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold">
-                Explain my deck
-              </h2>
-              <div className="flex flex-wrap gap-2">
-                <span className="rounded-full bg-accent/10 px-3 py-1 text-sm font-medium text-accent-strong">
-                  {analysis.analysis.explanation.profile.primaryArchetype}
-                </span>
-                {analysis.analysis.explanation.profile.secondaryArchetype ? (
-                  <span className="rounded-full bg-black/5 px-3 py-1 text-sm font-medium text-muted dark:bg-white/10">
-                    {analysis.analysis.explanation.profile.secondaryArchetype}
-                  </span>
-                ) : null}
-              </div>
-              <p className="text-base leading-relaxed text-ink">
-                {analysis.analysis.explanation.narrative}
-              </p>
-              {analysis.analysis.explanation.profile.keyMechanics.length > 0 ? (
-                <div>
-                  <h3 className="text-sm font-semibold text-ink">Key mechanics</h3>
-                  <p className="mt-1 text-sm text-muted">
-                    {analysis.analysis.explanation.profile.keyMechanics.join(" · ")}
-                  </p>
-                </div>
-              ) : null}
-            </Panel>
-          ) : null}
+          {tab === "explain" ? <ExplainTab explanation={analysis.analysis.explanation} /> : null}
 
           {tab === "cards" ? (
-            <Panel>
-              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold">
-                    Cards
-                  </h2>
-                  <p className="mt-1 text-sm text-muted">
-                    {cardsPending
-                      ? "Loading cards…"
-                      : `${analysis.resolved.entries.length} unique · ${stats?.totalCards ?? "—"} total`}
-                  </p>
-                </div>
-                <label className="block w-full space-y-1.5 sm:w-44">
-                  <span className="text-xs font-medium text-muted">Sort</span>
-                  <select
-                    className={selectClassName}
-                    value={cardSort}
-                    onChange={(e) => setCardSort(e.target.value as CardSort)}
-                  >
-                    {CARD_SORT_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {sortedCards.map((entry) => (
-                    <li
-                      key={entry.card.oracleId}
-                      className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] p-3 sm:flex-row"
-                    >
-                      <div className="mx-auto shrink-0 sm:mx-0">
-                        <CardArt
-                          name={entry.card.name}
-                          imageUri={entry.card.imageUri}
-                          prices={entry.card.prices}
-                          size="lg"
-                        />
-                      </div>
-                      <div className="min-w-0 flex-1 py-0.5 text-center sm:text-left">
-                        <p className="font-medium leading-snug text-ink">
-                          {entry.quantity > 1 ? `${entry.quantity}× ` : null}
-                          {entry.card.name}
-                          {entry.isCommander ? (
-                            <span className="ml-2 text-xs font-semibold uppercase tracking-wide text-accent-strong">
-                              Cmdr
-                            </span>
-                          ) : null}
-                        </p>
-                        <p className="mt-1 text-xs text-muted">{entry.card.typeLine}</p>
-                        <p className="mt-1 text-xs text-muted">
-                          {entry.roles
-                            .slice(0, 3)
-                            .map((role) => CARD_ROLE_LABELS[role])
-                            .join(" · ") || "—"}
-                        </p>
-                        <p className="mt-2 text-sm tabular-nums text-ink-muted">
-                          {entry.card.manaCost ?? "—"}
-                          {formatCardPrices(entry.card.prices)
-                            ? ` · ${formatCardPrices(entry.card.prices)}`
-                            : null}
-                        </p>
-                      </div>
-                    </li>
-                  ))}
-              </ul>
-            </Panel>
+            <CardsTab
+              entries={analysis.resolved.entries}
+              totalCards={analysis.analysis.statistics.totalCards}
+              pending={cardsPending}
+            />
           ) : null}
 
           {tab === "shared" ? (
             <Panel>
-              <h2 className="mb-1 font-[family-name:var(--font-display)] text-xl font-semibold">
+              <SectionTitle
+                className="mb-4"
+                description="Cards in this list that also appear in your other decks."
+              >
                 Shared with other decks
-              </h2>
-              <p className="mb-4 text-sm text-muted">
-                Cards in this list that also appear elsewhere in your browser library.
-              </p>
+              </SectionTitle>
               {sharedLoading ? (
-                <p className="text-sm text-muted">Loading other decks…</p>
+                <div className="space-y-2">
+                  <Skeleton className="h-16" />
+                  <Skeleton className="h-16" />
+                </div>
               ) : (
                 <SharedCardList items={sharedForDeck} cards={cards} />
               )}
             </Panel>
           ) : null}
-
         </>
       )}
     </div>
   );
 }
 
-function previewFromSnapshot(deck: DeckWithCards): LocalAnalysis | null {
-  const snap = deck.deck.analysisSnapshot;
-  if (!snap || snap.contentKey !== deckContentKey(deck)) return null;
-  return {
-    resolved: {
-      deck: deck.deck,
-      entries: [],
-      commanders: [],
-      unresolved: [],
-    },
-    analysis: snap.analysis,
-    additions: snap.additions ?? [],
-    healthSuggestions: snap.healthSuggestions ?? {},
-  };
+function DeckPageSkeleton() {
+  return (
+    <div className="space-y-5" aria-busy aria-label="Loading deck">
+      <div className="space-y-2">
+        <Skeleton className="h-3 w-20" />
+        <Skeleton className="h-8 w-2/3" />
+        <Skeleton className="h-4 w-1/3" />
+      </div>
+      <Skeleton className="h-44" />
+      <Skeleton className="h-12" />
+      <Skeleton className="h-28" />
+      <div className="grid gap-4 md:grid-cols-2">
+        <Skeleton className="h-48" />
+        <Skeleton className="h-48" />
+      </div>
+    </div>
+  );
 }

@@ -4,7 +4,17 @@ import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Library, Minus, Plus, Upload, WandSparkles } from "lucide-react";
 import { CardArt } from "@/components/card-art";
-import { Button, buttonClassName, EmptyState, PageHeader, Panel, StatChip } from "@/components/ui";
+import { useDialog } from "@/components/dialog";
+import { useToast } from "@/components/toast";
+import {
+  Button,
+  buttonClassName,
+  EmptyState,
+  PageHeader,
+  Panel,
+  selectClassName,
+  StatChip,
+} from "@/components/ui";
 import { classifyCard } from "@/domain/cards/classifier";
 import {
   CARD_ROLE_LABELS,
@@ -80,9 +90,6 @@ const ROLE_FILTER_OPTIONS: CardRole[] = [
   "LAND",
 ];
 
-const selectClassName =
-  "w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2.5 text-sm outline-none ring-accent focus:ring-2";
-
 function isCollectionSort(value: string): value is CollectionSort {
   return value === "name" || value === "quantity" || value === "price" || value === "manaValue";
 }
@@ -142,6 +149,8 @@ interface CollectionRow {
 
 export default function CollectionPage() {
   const { inventory, cards, loading, error, refresh, setQuantity } = useInventory();
+  const dialog = useDialog();
+  const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<CardRole | "all">("all");
@@ -213,15 +222,20 @@ export default function CollectionPage() {
 
   async function clearCollection() {
     if (inventory.length === 0 || clearing) return;
-    const ok = window.confirm(
-      "Delete your entire collection? Owned-card counts will be removed. Deck lists stay. This cannot be undone.",
-    );
+    const ok = await dialog.confirm({
+      title: "Delete your entire collection?",
+      description:
+        "Owned-card counts will be removed. Deck lists stay. This cannot be undone.",
+      confirmLabel: "Delete collection",
+      danger: true,
+    });
     if (!ok) return;
     setClearing(true);
     setImportMessage(null);
     try {
       await getRepository().clearInventory();
       await refresh();
+      toast("Collection deleted.");
     } catch (err) {
       setImportMessage(err instanceof Error ? err.message : "Could not delete the collection.");
     } finally {

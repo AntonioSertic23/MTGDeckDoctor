@@ -1,7 +1,10 @@
 import type { Metadata, Viewport } from "next";
 import { Fraunces, Source_Sans_3 } from "next/font/google";
 import { AppShell } from "@/components/app-shell";
+import { DialogProvider } from "@/components/dialog";
 import { RegisterServiceWorker } from "@/components/register-sw";
+import { ToastProvider } from "@/components/toast";
+import { THEME_INIT_SCRIPT } from "@/lib/theme";
 import { AuthProvider } from "@/lib/auth/auth-provider";
 import "./globals.css";
 
@@ -55,10 +58,22 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${display.variable} ${sans.variable} h-full antialiased`}>
+    <html
+      lang="en"
+      className={`${display.variable} ${sans.variable} h-full antialiased`}
+      // The inline theme script sets data-theme before React hydrates.
+      suppressHydrationWarning
+    >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="min-h-full flex flex-col font-sans">
         <AuthProvider>
-          <AppShell>{children}</AppShell>
+          <ToastProvider>
+            <DialogProvider>
+              <AppShell>{children}</AppShell>
+            </DialogProvider>
+          </ToastProvider>
         </AuthProvider>
         <RegisterServiceWorker />
       </body>

@@ -1,7 +1,7 @@
 import type { AdditionCandidate, CutCandidate } from "@/domain/types";
 import { CardArt } from "@/components/card-art";
 import { formatDeckNames } from "@/domain/recommendations/collection-aware";
-import { cn } from "@/lib/utils";
+import { cn, formatCardPrices } from "@/lib/utils";
 
 export function CutList({ cuts }: { cuts: CutCandidate[] }) {
   if (cuts.length === 0) {
@@ -58,6 +58,9 @@ export function AdditionList({ additions }: { additions: AdditionCandidate[] }) 
               <h3 className="font-semibold text-ink">{item.name}</h3>
               <span className="shrink-0 text-sm tabular-nums text-accent-strong">+{item.score}</span>
             </div>
+            <p className="mt-0.5 text-xs tabular-nums text-muted">
+              {formatCardPrices(item.prices) ?? "No price"}
+            </p>
             <CollectionBadges
               ownedCopies={item.ownedCopies}
               otherDeckNames={item.otherDeckNames}

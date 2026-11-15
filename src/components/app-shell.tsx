@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect } from "react";
 import { Activity, ArrowLeft, ChevronDown, Layers, Library, LogIn, Plus, Share2 } from "lucide-react";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { Menu } from "@/components/ui";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { getStorageBackend } from "@/lib/storage";
 import { cn } from "@/lib/utils";
@@ -116,7 +118,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </nav>
           ) : null}
 
-          <div className="z-10 ml-auto flex shrink-0 items-center">
+          <div className="z-10 ml-auto flex shrink-0 items-center gap-1">
+            <ThemeToggle />
             {configured && user ? (
               <AccountMenu
                 email={user.email ?? "Account"}
@@ -175,56 +178,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 }
 
 function AccountMenu({ email, onSignOut }: { email: string; onSignOut: () => void }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointer = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onPointer);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onPointer);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
   return (
-    <div className="relative" ref={rootRef}>
-      <button
-        type="button"
-        className="inline-flex max-w-[42vw] items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-muted transition hover:bg-black/5 hover:text-ink sm:max-w-[16rem] dark:hover:bg-white/5"
-        aria-expanded={open}
-        aria-haspopup="menu"
-        title={email}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <span className="truncate">{email}</span>
-        <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 transition", open && "rotate-180")} aria-hidden />
-      </button>
-      {open ? (
-        <div
-          role="menu"
-          className="absolute right-0 z-40 mt-1 min-w-36 rounded-xl border border-[var(--border)] bg-[var(--card)] p-1 shadow-lg"
+    <Menu
+      items={[{ label: "Sign out", onSelect: onSignOut }]}
+      trigger={(props) => (
+        <button
+          type="button"
+          className="inline-flex max-w-[42vw] items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-muted transition hover:bg-black/5 hover:text-ink sm:max-w-[16rem] dark:hover:bg-white/5"
+          title={email}
+          {...props}
         >
-          <button
-            type="button"
-            role="menuitem"
-            className="w-full rounded-lg px-3 py-2 text-left text-sm font-medium text-ink hover:bg-black/5 dark:hover:bg-white/5"
-            onClick={() => {
-              setOpen(false);
-              onSignOut();
-            }}
-          >
-            Sign out
-          </button>
-        </div>
-      ) : null}
-    </div>
+          <span className="truncate">{email}</span>
+          <ChevronDown
+            className={cn("h-3.5 w-3.5 shrink-0 transition", props["aria-expanded"] && "rotate-180")}
+            aria-hidden
+          />
+        </button>
+      )}
+    />
   );
 }

@@ -3,7 +3,16 @@
 import Link from "next/link";
 import { useMemo, useTransition } from "react";
 import { DeckClinicList } from "@/components/deck-clinic-list";
-import { Button, buttonClassName, EmptyState, PageHeader, Panel } from "@/components/ui";
+import {
+  Button,
+  buttonClassName,
+  EmptyState,
+  PageHeader,
+  Panel,
+  Select,
+  Skeleton,
+} from "@/components/ui";
+import { sortColors } from "@/domain/decks/sort-entries";
 import type { Card, Color, Deck, DeckAnalysis } from "@/domain/types";
 import { exportDecksToFile } from "@/lib/decks/file-io";
 import { usePersistedState } from "@/lib/hooks/use-persisted-state";
@@ -14,8 +23,6 @@ type ReadyFilter = "all" | "ready" | "not-ready";
 
 const DECK_SORT_KEY = "mtg-deck-doctor:decks-sort";
 const DECK_READY_FILTER_KEY = "mtg-deck-doctor:decks-ready-filter";
-
-const COLOR_RANK: Record<Color, number> = { W: 0, U: 1, B: 2, R: 3, G: 4 };
 
 const SORT_OPTIONS: { value: DeckSort; label: string }[] = [
   { value: "name", label: "Alphabetical" },
@@ -45,7 +52,7 @@ function commanderColors(deck: Deck, cards: Map<string, Card>): Color[] {
     if (!card) continue;
     for (const color of card.colorIdentity) set.add(color);
   }
-  return [...set].sort((a, b) => COLOR_RANK[a] - COLOR_RANK[b]);
+  return sortColors([...set]);
 }
 
 function colorSortKey(colors: Color[]): string {
@@ -82,9 +89,6 @@ function sortDecks(decks: Deck[], cards: Map<string, Card>, sort: DeckSort): Dec
   return copy;
 }
 
-const selectClassName =
-  "w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2.5 text-sm outline-none ring-accent focus:ring-2";
-
 export default function DecksPage() {
   const { decks, cards, loading, error } = useDeckShelf();
   const scores = useMemo(() => {
@@ -119,6 +123,11 @@ export default function DecksPage() {
         description="Every Commander list with art, health score, and a quick pulse across categories."
         actions={
           <>
+            {decks.length > 1 ? (
+              <Link href="/decks/compare" className={buttonClassName("secondary")}>
+                Compare
+              </Link>
+            ) : null}
             {decks.length > 0 ? (
               <Button
                 variant="secondary"
@@ -135,7 +144,18 @@ export default function DecksPage() {
         }
       />
 
-      {loading ? <p className="text-sm text-muted">Loading decks…</p> : null}
+      {loading && decks.length === 0 ? (
+        <ul className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4" aria-busy aria-label="Loading decks">
+          {Array.from({ length: 8 }, (_, index) => (
+            <li key={index} className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-2">
+              <Skeleton className="aspect-[5/7] w-full rounded-lg" />
+              <Skeleton className="mt-3 h-1.5 w-full" />
+              <Skeleton className="mt-3 h-4 w-3/4" />
+              <Skeleton className="mt-1.5 h-3 w-1/2" />
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {error ? <p className="text-sm text-rose-600">{error}</p> : null}
 
       {!loading && decks.length === 0 ? (
@@ -154,34 +174,30 @@ export default function DecksPage() {
         <div className="space-y-4">
           <Panel>
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-              <label className="block w-full min-w-0 flex-1 space-y-1.5 sm:max-w-xs">
-                <span className="text-xs font-medium text-muted">Sort by</span>
-                <select
-                  value={sort}
-                  onChange={(e) => setSort(e.target.value as DeckSort)}
-                  className={selectClassName}
-                >
-                  {SORT_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block w-full min-w-0 flex-1 space-y-1.5 sm:max-w-xs">
-                <span className="text-xs font-medium text-muted">Show</span>
-                <select
-                  value={readyFilter}
-                  onChange={(e) => setReadyFilter(e.target.value as ReadyFilter)}
-                  className={selectClassName}
-                >
-                  {READY_FILTER_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <Select
+                label="Sort by"
+                wrapperClassName="flex-1 sm:max-w-xs"
+                value={sort}
+                onChange={(e) => setSort(e.target.value as DeckSort)}
+              >
+                {SORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </Select>
+              <Select
+                label="Show"
+                wrapperClassName="flex-1 sm:max-w-xs"
+                value={readyFilter}
+                onChange={(e) => setReadyFilter(e.target.value as ReadyFilter)}
+              >
+                {READY_FILTER_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </Select>
             </div>
           </Panel>
 
