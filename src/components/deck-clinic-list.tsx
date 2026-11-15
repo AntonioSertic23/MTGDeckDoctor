@@ -27,7 +27,7 @@ export function DeckClinicList({
             <Link
               href={`/decks/${deck.id}`}
               className={cn(
-                "flex h-full flex-col rounded-2xl border bg-[var(--card)] p-2 transition",
+                "group flex h-full flex-col rounded-2xl border bg-[var(--card)] p-2 transition",
                 deck.ready
                   ? "border-emerald-400/80 shadow-[0_0_22px_rgba(16,185,129,0.45)]"
                   : "border-[var(--border)] hover:border-accent/40",
@@ -43,6 +43,7 @@ export function DeckClinicList({
                       prices={commander.prices}
                       size="fill"
                       className="w-full"
+                      enlarge={false}
                     />
                   ))
                 ) : (

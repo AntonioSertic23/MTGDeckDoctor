@@ -39,12 +39,15 @@ export function CardArt({
   prices,
   size = "md",
   className,
+  enlarge = true,
 }: {
   name: string;
   imageUri?: string | null;
   prices?: CardPrices | null;
   size?: ArtSize;
   className?: string;
+  /** When false, the image is not a button, so a parent link receives the click. */
+  enlarge?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const titleId = useId();
@@ -85,6 +88,26 @@ export function CardArt({
     );
   }
 
+  const image = (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={imageUri}
+      alt={name}
+      width={dim.width}
+      height={dim.height}
+      loading="lazy"
+      className={cn(
+        dim.className,
+        size === "fill" ? "object-contain" : "object-cover",
+        "rounded-lg shadow-md transition group-hover:shadow-lg group-hover:ring-2 group-hover:ring-accent/40",
+      )}
+    />
+  );
+
+  if (!enlarge) {
+    return <span className={cn("block", size === "fill" && "w-full", className)}>{image}</span>;
+  }
+
   return (
     <>
       <button
@@ -101,19 +124,7 @@ export function CardArt({
         )}
         aria-label={`Enlarge ${name}${priceLabel ? `, ${priceLabel}` : ""}`}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={imageUri}
-          alt={name}
-          width={dim.width}
-          height={dim.height}
-          loading="lazy"
-          className={cn(
-            dim.className,
-            size === "fill" ? "object-contain" : "object-cover",
-            "rounded-lg shadow-md transition group-hover:shadow-lg group-hover:ring-2 group-hover:ring-accent/40",
-          )}
-        />
+        {image}
       </button>
 
       {open ? (

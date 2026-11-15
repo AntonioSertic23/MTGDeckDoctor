@@ -422,7 +422,7 @@ export default function DeckDetailPage() {
           <textarea
             value={notesDraft}
             onChange={(e) => setNotesDraft(e.target.value)}
-            rows={8}
+            rows={16}
             placeholder="Add notes for this deck…"
             disabled={busy || deleting}
             className="w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2.5 text-sm leading-relaxed outline-none ring-accent focus:ring-2 disabled:opacity-60"
