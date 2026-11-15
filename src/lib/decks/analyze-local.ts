@@ -1,5 +1,6 @@
 import { analyzeDeck, resolveDeck } from "@/domain/analysis/analyze";
 import { DEFAULT_THRESHOLDS } from "@/domain/analysis/health-config";
+import { historyPoint, nextHealthHistory } from "@/domain/analysis/history";
 import { suggestAdditions } from "@/domain/recommendations/additions";
 import {
   buildCollectionContext,
@@ -26,15 +27,24 @@ import { getRepository } from "@/lib/storage";
 export interface LocalAnalysis {
   resolved: ResolvedDeck;
   analysis: DeckAnalysis;
+  /**
+   * Ranked additions. Larger than what the Adds tab shows so a budget filter
+   * still has enough cards left to fill the list.
+   */
   additions: AdditionCandidate[];
   /** Staple picks for weak health categories (removal, ramp, …). */
   healthSuggestions: Partial<Record<HealthCategoryId, AdditionCandidate[]>>;
 }
 
+/** Shown on the Adds tab at once. */
+export const ADDITIONS_SHOWN = 12;
+/** Computed and stored, so a price cap can still fill `ADDITIONS_SHOWN`. */
+const ADDITIONS_POOL = 30;
+
 /** Content fingerprint — changes when cards or commanders change, not on rename. */
 export function deckContentKey(deck: DeckWithCards): string {
   // Bump when the analysis payload shape changes (e.g. problem suggestions).
-  const version = 6;
+  const version = 7;
   const commanders = [...deck.deck.commanderOracleIds].sort().join("+");
   const cards = [...deck.cards]
     .map((c) => `${c.oracleId}:${c.quantity}`)
@@ -46,10 +56,13 @@ export function deckContentKey(deck: DeckWithCards): string {
 /**
  * Returns a cached diagnosis when the list content is unchanged; otherwise runs
  * the analyzer and persists the snapshot.
+ *
+ * `previousSnapshot` carries health history across flows that clear the stored
+ * snapshot before re-analyzing (Replace list).
  */
 export async function getCachedOrAnalyzeDeck(
   deck: DeckWithCards,
-  options: { force?: boolean } = {},
+  options: { force?: boolean; previousSnapshot?: DeckAnalysisSnapshot | null } = {},
 ): Promise<LocalAnalysis> {
   const key = deckContentKey(deck);
   const snap = deck.deck.analysisSnapshot;
@@ -65,12 +78,17 @@ export async function getCachedOrAnalyzeDeck(
   }
 
   const result = await analyzeDeckLocal(deck);
+  const computedAt = new Date().toISOString();
   const snapshot: DeckAnalysisSnapshot = {
     contentKey: key,
     analysis: result.analysis,
     additions: result.additions,
     healthSuggestions: result.healthSuggestions,
-    computedAt: new Date().toISOString(),
+    computedAt,
+    history: nextHealthHistory(
+      options.previousSnapshot ?? snap,
+      historyPoint(result.analysis, key, computedAt),
+    ),
   };
   await getRepository().saveAnalysisSnapshot(deck.deck.id, snapshot);
   deck.deck.analysisSnapshot = snapshot;
@@ -89,48 +107,60 @@ async function finishWithCollection(
   analysis: DeckAnalysis,
 ): Promise<LocalAnalysis> {
   const collection = await loadCollectionContext(resolved);
-  const additions = await withAdditionArt(
-    suggestAdditions(
-      resolved,
-      analysis.statistics,
-      analysis.synergy,
-      DEFAULT_THRESHOLDS,
-      12,
-      collection,
-    ),
+
+  const additions = suggestAdditions(
+    resolved,
+    analysis.statistics,
+    analysis.synergy,
+    DEFAULT_THRESHOLDS,
+    ADDITIONS_POOL,
+    collection,
   );
 
   const cuts = suggestCuts(resolved, analysis.statistics, analysis.synergy, analysis.problems, 12, {
     collection,
   });
 
-  const problems = await hydrateProblemSuggestionArt(
-    enrichProblemsWithSuggestions(
-      stripSuggestions(analysis.problems),
-      resolved,
-      analysis.statistics,
-      analysis.synergy,
-      DEFAULT_THRESHOLDS,
-      collection,
-    ),
+  const problems = enrichProblemsWithSuggestions(
+    stripSuggestions(analysis.problems),
+    resolved,
+    analysis.statistics,
+    analysis.synergy,
+    DEFAULT_THRESHOLDS,
+    collection,
   );
 
-  const healthSuggestions = await withHealthSuggestionArt(
-    suggestionsForHealthCategories(
-      resolved,
-      analysis.statistics,
-      analysis.synergy,
-      analysis.health.categories,
-      DEFAULT_THRESHOLDS,
-      collection,
-    ),
+  const healthSuggestions = suggestionsForHealthCategories(
+    resolved,
+    analysis.statistics,
+    analysis.synergy,
+    analysis.health.categories,
+    DEFAULT_THRESHOLDS,
+    collection,
   );
+
+  // One lookup for every suggested card instead of one per list.
+  const meta = await resolveMetaByName([
+    ...additions.map((a) => a.name),
+    ...problems.flatMap((p) => (p.suggestions ?? []).map((s) => s.name)),
+    ...Object.values(healthSuggestions).flatMap((list) => (list ?? []).map((s) => s.name)),
+  ]);
+
+  const withArt = (list: AdditionCandidate[]) => list.map((item) => applyArt(item, meta));
 
   return {
     resolved,
-    analysis: { ...analysis, cuts, problems },
-    additions,
-    healthSuggestions,
+    analysis: {
+      ...analysis,
+      cuts,
+      problems: problems.map((problem) =>
+        problem.suggestions ? { ...problem, suggestions: withArt(problem.suggestions) } : problem,
+      ),
+    },
+    additions: withArt(additions),
+    healthSuggestions: Object.fromEntries(
+      Object.entries(healthSuggestions).map(([id, list]) => [id, withArt(list ?? [])]),
+    ) as Partial<Record<HealthCategoryId, AdditionCandidate[]>>,
   };
 }
 
@@ -155,7 +185,11 @@ async function loadCollectionContext(resolved: ResolvedDeck): Promise<Collection
 }
 
 function stripSuggestions(problems: Problem[]): Problem[] {
-  return problems.map(({ suggestions: _suggestions, ...problem }) => problem);
+  return problems.map((problem) => {
+    const copy = { ...problem };
+    delete copy.suggestions;
+    return copy;
+  });
 }
 
 async function resolveOnly(deck: DeckWithCards): Promise<ResolvedDeck> {
@@ -165,71 +199,29 @@ async function resolveOnly(deck: DeckWithCards): Promise<ResolvedDeck> {
   return resolveDeck(deck, map);
 }
 
-async function hydrateProblemSuggestionArt(
-  problems: DeckAnalysis["problems"],
-): Promise<DeckAnalysis["problems"]> {
-  const names = problems.flatMap((p) => (p.suggestions ?? []).map((s) => s.name));
-  if (names.length === 0) return problems;
-  const meta = await resolveMetaByName(names);
-  return problems.map((problem) => ({
-    ...problem,
-    suggestions: problem.suggestions?.map((s) => {
-      const hit = meta.get(normalize(s.name));
-      return {
-        ...s,
-        imageUri: hit?.imageUri ?? s.imageUri ?? null,
-        prices: hit?.prices ?? s.prices ?? null,
-      };
-    }),
-  }));
+type CardMeta = { imageUri: string | null; prices: CardPrices };
+
+function applyArt<T extends { name: string; imageUri?: string | null; prices?: CardPrices | null }>(
+  item: T,
+  meta: Map<string, CardMeta>,
+): T {
+  const hit = meta.get(normalize(item.name));
+  return {
+    ...item,
+    imageUri: hit?.imageUri ?? item.imageUri ?? null,
+    prices: hit?.prices ?? item.prices ?? null,
+  };
 }
 
-async function withHealthSuggestionArt(
-  byCategory: Partial<Record<HealthCategoryId, AdditionCandidate[]>>,
-): Promise<Partial<Record<HealthCategoryId, AdditionCandidate[]>>> {
-  const names = Object.values(byCategory).flatMap((list) => (list ?? []).map((s) => s.name));
-  if (names.length === 0) return byCategory;
-  const meta = await resolveMetaByName(names);
-  const next: Partial<Record<HealthCategoryId, AdditionCandidate[]>> = {};
-  for (const [id, list] of Object.entries(byCategory) as [
-    HealthCategoryId,
-    AdditionCandidate[] | undefined,
-  ][]) {
-    if (!list) continue;
-    next[id] = list.map((s) => {
-      const hit = meta.get(normalize(s.name));
-      return {
-        ...s,
-        imageUri: hit?.imageUri ?? s.imageUri ?? null,
-        prices: hit?.prices ?? s.prices ?? null,
-      };
-    });
-  }
-  return next;
-}
-
-/** Resolve staple suggestion names so Cuts/Adds can show card images + prices. */
-async function withAdditionArt(additions: AdditionCandidate[]): Promise<AdditionCandidate[]> {
-  if (additions.length === 0) return additions;
-  const meta = await resolveMetaByName(additions.map((a) => a.name));
-  return additions.map((addition) => {
-    const hit = meta.get(normalize(addition.name));
-    return {
-      ...addition,
-      imageUri: hit?.imageUri ?? addition.imageUri ?? null,
-      prices: hit?.prices ?? addition.prices ?? null,
-    };
-  });
-}
-
-async function resolveMetaByName(
-  names: string[],
-): Promise<Map<string, { imageUri: string | null; prices: CardPrices }>> {
-  const byName = new Map<string, { imageUri: string | null; prices: CardPrices }>();
-  if (names.length === 0) return byName;
+/** Resolve suggestion names so lists can show card images + prices. */
+async function resolveMetaByName(names: string[]): Promise<Map<string, CardMeta>> {
+  const byName = new Map<string, CardMeta>();
+  // Dedupe case-insensitively but send the original spelling.
+  const unique = [...new Map(names.map((name) => [normalize(name), name])).values()];
+  if (unique.length === 0) return byName;
 
   try {
-    const { cards } = await resolveCardNames(names);
+    const { cards } = await resolveCardNames(unique);
     for (const card of cards) {
       const meta = { imageUri: card.imageUri, prices: card.prices };
       byName.set(normalize(card.name), meta);

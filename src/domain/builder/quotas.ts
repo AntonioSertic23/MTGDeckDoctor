@@ -61,7 +61,7 @@ export function quotasForCommander(commander: Card): BuildQuotas {
   let spotRemoval = t.recommendedSpotRemoval;
   let boardWipes = t.recommendedBoardWipes;
   let interaction = t.recommendedInstantSpeedInteraction;
-  let winConditions = t.recommendedWinConditions;
+  const winConditions = t.recommendedWinConditions;
 
   if (identity.has("G")) {
     ramp = clamp(ramp + 2, t.minRamp, t.maxRamp);

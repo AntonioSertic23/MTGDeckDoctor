@@ -145,7 +145,11 @@ export async function replaceDeckList(
   await getRepository().updateDeck(deck);
   await getRepository().setDeckCards(deckId, resolved.cards);
   try {
-    await getCachedOrAnalyzeDeck({ deck: { ...deck, analysisSnapshot: null }, cards: resolved.cards });
+    await getCachedOrAnalyzeDeck(
+      { deck: { ...deck, analysisSnapshot: null }, cards: resolved.cards },
+      // setDeckCards cleared the stored snapshot; keep its health history.
+      { previousSnapshot: existing.deck.analysisSnapshot },
+    );
   } catch {
     // Analysis can retry when the user opens the deck / home.
   }

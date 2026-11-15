@@ -16,6 +16,31 @@ const SIZE: Record<ArtSize, { className: string; width: number; height: number }
   fill: { className: "aspect-[5/7] h-auto w-full", width: 244, height: 340 },
 };
 
+const SCRYFALL_IMAGE_HOST = "cards.scryfall.io";
+
+/**
+ * Scryfall serves the same image in several sizes under different path
+ * segments (`/small/`, `/normal/`, `/large/`). Other URLs pass through.
+ */
+export function scryfallImageVariant(uri: string, variant: "small" | "normal" | "large"): string {
+  if (!uri.includes(SCRYFALL_IMAGE_HOST)) return uri;
+  return uri.replace(/\/(small|normal|large)\//, `/${variant}/`);
+}
+
+/** Scryfall's CDN sends CORS headers, so the service worker can cache these responses. */
+function corsFor(uri: string): "anonymous" | undefined {
+  return uri.includes(SCRYFALL_IMAGE_HOST) ? "anonymous" : undefined;
+}
+
+/** Thumbnails up to 80px wide look sharp with the 146px "small" image. */
+const THUMB_VARIANT: Record<ArtSize, "small" | "normal"> = {
+  xs: "small",
+  sm: "small",
+  md: "normal",
+  lg: "normal",
+  fill: "normal",
+};
+
 /** Swallow the click that would otherwise hit a Link under a just-closed overlay. */
 function blockClickThrough() {
   const blocker = (event: MouseEvent | PointerEvent) => {
@@ -91,11 +116,13 @@ export function CardArt({
   const image = (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={imageUri}
+      src={scryfallImageVariant(imageUri, THUMB_VARIANT[size])}
+      crossOrigin={corsFor(imageUri)}
       alt={name}
       width={dim.width}
       height={dim.height}
       loading="lazy"
+      decoding="async"
       className={cn(
         dim.className,
         size === "fill" ? "object-contain" : "object-cover",
@@ -175,7 +202,8 @@ export function CardArt({
             </div>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={imageUri}
+              src={scryfallImageVariant(imageUri, "large")}
+              crossOrigin={corsFor(imageUri)}
               alt={name}
               className="max-h-[min(80vh,720px)] w-auto max-w-full rounded-2xl object-contain shadow-2xl"
             />

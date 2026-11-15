@@ -28,6 +28,29 @@ function rememberShelf(next: ShelfCache) {
   shelfCache = next;
 }
 
+/**
+ * Fetches art for cards that are missing locally or have no image, saves them,
+ * and returns an updated map — or null when nothing changed. Failures (offline,
+ * Scryfall down) are swallowed: callers keep what they already have.
+ */
+async function hydrateMissingArt(
+  oracleIds: string[],
+  cardMap: Map<string, Card>,
+): Promise<Map<string, Card> | null> {
+  const missing = oracleIds.filter((id) => !cardMap.get(id)?.imageUri);
+  if (missing.length === 0) return null;
+  try {
+    const hydrated = await resolveCardsByOracleIds(missing);
+    if (hydrated.length === 0) return null;
+    await getRepository().saveCards(hydrated);
+    const next = new Map(cardMap);
+    for (const card of hydrated) next.set(card.oracleId, card);
+    return next;
+  } catch {
+    return null;
+  }
+}
+
 /** Drop in-memory card art so the next page load reads printings just saved. */
 export function invalidateStoredCardCaches(): void {
   libraryCache = null;
@@ -79,18 +102,10 @@ export function useDeckShelf() {
       setCards(cardMap);
       setLoading(false);
 
-      const missingArt = commanderIds.filter((id) => !cardMap.get(id)?.imageUri);
-      if (missingArt.length === 0) return;
-      try {
-        const hydrated = await resolveCardsByOracleIds(missingArt);
-        if (hydrated.length === 0) return;
-        await repo.saveCards(hydrated);
-        const next = new Map(cardMap);
-        for (const card of hydrated) next.set(card.oracleId, card);
-        rememberShelf({ decks: list, cards: next });
-        setCards(next);
-      } catch {
-        // Shelf still shows names if art cannot be fetched.
+      const withArt = await hydrateMissingArt(commanderIds, cardMap);
+      if (withArt) {
+        rememberShelf({ decks: list, cards: withArt });
+        setCards(withArt);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load decks.");
@@ -135,18 +150,10 @@ export function useDecksWithCards(enabled = true) {
       setInventory(inv);
       setLoading(false);
 
-      const missingOrNoArt = [...neededIds].filter((id) => !cardMap.get(id)?.imageUri);
-      if (missingOrNoArt.length === 0) return;
-      try {
-        const hydrated = await resolveCardsByOracleIds(missingOrNoArt);
-        if (hydrated.length === 0) return;
-        await repo.saveCards(hydrated);
-        const withArt = new Map(cardMap);
-        for (const card of hydrated) withArt.set(card.oracleId, card);
+      const withArt = await hydrateMissingArt([...neededIds], cardMap);
+      if (withArt) {
         rememberLibrary({ decks: list, cards: withArt, inventory: inv });
         setCards(withArt);
-      } catch {
-        // Offline / Scryfall down — keep whatever local cache we have.
       }
     } catch (err) {
       const message =
@@ -179,6 +186,11 @@ export function useDeck(id: string) {
 
   const refresh = useCallback(async () => {
     const requestId = id;
+    if (!requestId) {
+      setDeck(null);
+      setLoading(false);
+      return;
+    }
     try {
       setError(null);
       const result = await getRepository().getDeck(requestId);
@@ -221,18 +233,10 @@ export function useInventory() {
       setCards(cardMap);
       setLoading(false);
 
-      const missingOrNoArt = neededIds.filter((id) => !cardMap.get(id)?.imageUri);
-      if (missingOrNoArt.length === 0) return;
-      try {
-        const hydrated = await resolveCardsByOracleIds(missingOrNoArt);
-        if (hydrated.length === 0) return;
-        await repo.saveCards(hydrated);
-        const next = new Map(cardMap);
-        for (const card of hydrated) next.set(card.oracleId, card);
-        inventoryCache = { inventory: inv, cards: next };
-        setCards(next);
-      } catch {
-        // Offline / Scryfall down — keep local cache.
+      const withArt = await hydrateMissingArt(neededIds, cardMap);
+      if (withArt) {
+        inventoryCache = { inventory: inv, cards: withArt };
+        setCards(withArt);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load collection.");

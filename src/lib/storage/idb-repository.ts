@@ -6,7 +6,6 @@ import type {
   CardAllocation,
   Deck,
   DeckCard,
-  DeckWithCards,
   InventoryItem,
 } from "@/domain/types";
 import { normalizeDeck } from "@/domain/decks/normalize";

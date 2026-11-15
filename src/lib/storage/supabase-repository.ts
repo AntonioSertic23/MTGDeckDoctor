@@ -2,14 +2,11 @@
 
 import type {
   Card,
-  CardAllocation,
   Color,
   Deck,
   DeckAnalysisSnapshot,
   DeckCard,
   DeckFormat,
-  DeckWithCards,
-  InventoryItem,
 } from "@/domain/types";
 import type { DeckRepository } from "@/lib/storage/repository";
 import { ensureSupabaseUserId, getSupabaseBrowserClient } from "@/lib/supabase/client";

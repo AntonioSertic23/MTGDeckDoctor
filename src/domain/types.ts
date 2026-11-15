@@ -139,6 +139,18 @@ export interface DeckAnalysisSnapshot {
   additions: AdditionCandidate[];
   healthSuggestions?: Partial<Record<HealthCategoryId, AdditionCandidate[]>>;
   computedAt: string;
+  /** One point per distinct list version, oldest first (capped). */
+  history?: HealthHistoryPoint[];
+}
+
+export interface HealthHistoryPoint {
+  /** ISO timestamp of the diagnosis. */
+  at: string;
+  overall: number;
+  averageManaValue: number;
+  totalCards: number;
+  /** Content key without the analyzer version prefix. */
+  listKey: string;
 }
 
 export interface DeckCard {
