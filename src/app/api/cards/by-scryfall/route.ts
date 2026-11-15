@@ -7,6 +7,8 @@ export const maxDuration = 60;
 
 const bodySchema = z.object({
   scryfallIds: z.array(z.string().uuid()).min(1).max(500),
+  /** Skip the server's in-memory card cache (price refresh). */
+  fresh: z.boolean().optional(),
 });
 
 /** Resolves exact printings. Oracle-id lookup returns a default art and is the wrong tool here. */
@@ -21,7 +23,9 @@ export async function POST(request: Request) {
   }
 
   try {
-    const cards = await scryfallProvider.getByScryfallIds(parsed.data.scryfallIds);
+    const cards = await scryfallProvider.getByScryfallIds(parsed.data.scryfallIds, {
+      fresh: parsed.data.fresh,
+    });
     return Response.json({ cards });
   } catch (error) {
     return cardProviderErrorResponse(error);

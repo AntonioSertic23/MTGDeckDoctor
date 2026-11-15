@@ -180,9 +180,7 @@ export const idbRepository: DeckRepository = {
   },
 
   async setInventoryQuantity(oracleId, quantity) {
-    const db = await getDb();
-    if (quantity <= 0) await db.delete("inventory", oracleId);
-    else await db.put("inventory", { oracleId, quantity });
+    await this.setInventoryItems([{ oracleId, quantity }]);
   },
 
   async setInventoryItems(items) {
@@ -190,10 +188,37 @@ export const idbRepository: DeckRepository = {
     const db = await getDb();
     const tx = db.transaction("inventory", "readwrite");
     for (const item of items) {
-      if (item.quantity <= 0) await tx.store.delete(item.oracleId);
-      else await tx.store.put({ oracleId: item.oracleId, quantity: item.quantity });
+      if (item.quantity <= 0) {
+        await tx.store.delete(item.oracleId);
+        continue;
+      }
+      // Keep foil / purchase details; only the quantity changes here.
+      const existing = await tx.store.get(item.oracleId);
+      await tx.store.put({
+        ...existing,
+        oracleId: item.oracleId,
+        quantity: item.quantity,
+        foilQuantity: Math.min(item.quantity, existing?.foilQuantity ?? 0),
+      });
     }
     await tx.done;
+  },
+
+  async setInventoryDetails(items) {
+    if (items.length === 0) return true;
+    const db = await getDb();
+    const tx = db.transaction("inventory", "readwrite");
+    for (const item of items) {
+      if (item.quantity <= 0) continue;
+      await tx.store.put({
+        oracleId: item.oracleId,
+        quantity: item.quantity,
+        foilQuantity: Math.min(item.quantity, Math.max(0, item.foilQuantity ?? 0)),
+        purchaseEur: item.purchaseEur ?? null,
+      });
+    }
+    await tx.done;
+    return true;
   },
 
   async clearInventory() {

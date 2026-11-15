@@ -25,6 +25,7 @@ create table if not exists public.cards (
   rarity text not null default '',
   price_usd text,
   price_eur text,
+  price_eur_foil text,
   legalities jsonb not null default '{}'::jsonb,
   updated_at timestamptz not null default now()
 );
@@ -49,6 +50,8 @@ alter table public.decks add column if not exists analysis_snapshot jsonb;
 alter table public.decks add column if not exists ready boolean not null default false;
 alter table public.decks add column if not exists times_brought integer not null default 0;
 alter table public.decks add column if not exists times_played integer not null default 0;
+-- Price tracking (same as supabase/add-price-tracking.sql):
+alter table public.cards add column if not exists price_eur_foil text;
 
 create index if not exists decks_user_id_idx on public.decks (user_id);
 
@@ -65,8 +68,15 @@ create table if not exists public.inventory_items (
   user_id uuid not null references auth.users (id) on delete cascade,
   oracle_id text not null,
   quantity integer not null check (quantity > 0),
+  foil_quantity integer not null default 0 check (foil_quantity >= 0),
+  purchase_eur numeric(12, 2) check (purchase_eur is null or purchase_eur >= 0),
   primary key (user_id, oracle_id)
 );
+
+alter table public.inventory_items
+  add column if not exists foil_quantity integer not null default 0 check (foil_quantity >= 0);
+alter table public.inventory_items
+  add column if not exists purchase_eur numeric(12, 2) check (purchase_eur is null or purchase_eur >= 0);
 
 create table if not exists public.card_allocations (
   user_id uuid not null references auth.users (id) on delete cascade,

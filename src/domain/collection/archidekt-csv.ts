@@ -3,7 +3,8 @@
  *
  * Exports include Quantity, Name, Scryfall Oracle ID (and many printing fields).
  * Inventory is oracle-level, so foil/normal/printings of the same card are
- * aggregated into one quantity.
+ * aggregated into one quantity. Foil copies and purchase prices are summed
+ * alongside so the collection can be valued per finish.
  */
 
 export interface ArchidektCollectionRow {
@@ -20,6 +21,10 @@ export interface AggregatedCollectionEntry {
   oracleId: string | null;
   name: string;
   quantity: number;
+  /** Copies whose Finish is Foil or Etched. */
+  foilQuantity: number;
+  /** Purchase Price × quantity summed over rows that had one; null if none did. */
+  purchaseEur: number | null;
   /** Rows that lacked an oracle id (resolved later by name). */
   needsNameResolve: boolean;
 }
@@ -29,6 +34,8 @@ export interface ParseArchidektCollectionResult {
   /** Raw data rows counted (excluding header). */
   rowCount: number;
   ignoredRows: string[];
+  /** The file has a Finish and/or Purchase Price column, so details can be stored. */
+  hasDetails: boolean;
 }
 
 const HEADER_ALIASES: Record<string, keyof MappedColumns> = {
@@ -37,6 +44,8 @@ const HEADER_ALIASES: Record<string, keyof MappedColumns> = {
   "scryfall oracle id": "oracleId",
   "scryfall id": "scryfallId",
   "edition code": "setCode",
+  finish: "finish",
+  "purchase price": "purchasePrice",
 };
 
 interface MappedColumns {
@@ -45,13 +54,15 @@ interface MappedColumns {
   oracleId: number;
   scryfallId: number;
   setCode: number;
+  finish: number;
+  purchasePrice: number;
 }
 
 export function parseArchidektCollectionCsv(input: string): ParseArchidektCollectionResult {
   const text = stripBom(input).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const rows = parseCsv(text);
   if (rows.length === 0) {
-    return { entries: [], rowCount: 0, ignoredRows: [] };
+    return { entries: [], rowCount: 0, ignoredRows: [], hasDetails: false };
   }
 
   const header = rows[0]!.map((cell) => cell.trim());
@@ -82,37 +93,31 @@ export function parseArchidektCollectionCsv(input: string): ParseArchidektCollec
       continue;
     }
 
-    if (oracleId) {
-      const existing = byOracle.get(oracleId);
-      if (existing) existing.quantity += quantity;
-      else {
-        byOracle.set(oracleId, {
-          oracleId,
-          name,
-          quantity,
-          needsNameResolve: false,
-        });
-      }
-      continue;
-    }
-
-    const key = normalizeName(name);
-    const existing = byNameKey.get(key);
-    if (existing) existing.quantity += quantity;
-    else {
-      byNameKey.set(key, {
-        oracleId: null,
+    const foil = isFoilFinish(cellAt(cells, columns.finish));
+    const unitPrice = parsePrice(cellAt(cells, columns.purchasePrice));
+    const map = oracleId ? byOracle : byNameKey;
+    const key = oracleId ?? normalizeName(name);
+    const entry =
+      map.get(key) ??
+      ({
+        oracleId,
         name,
-        quantity,
-        needsNameResolve: true,
-      });
-    }
+        quantity: 0,
+        foilQuantity: 0,
+        purchaseEur: null,
+        needsNameResolve: !oracleId,
+      } satisfies AggregatedCollectionEntry);
+    entry.quantity += quantity;
+    if (foil) entry.foilQuantity += quantity;
+    if (unitPrice !== null) entry.purchaseEur = round2((entry.purchaseEur ?? 0) + unitPrice * quantity);
+    map.set(key, entry);
   }
 
   return {
     entries: [...byOracle.values(), ...byNameKey.values()],
     rowCount,
     ignoredRows,
+    hasDetails: columns.finish >= 0 || columns.purchasePrice >= 0,
   };
 }
 
@@ -173,6 +178,8 @@ function mapColumns(header: string[]): MappedColumns {
     oracleId: -1,
     scryfallId: -1,
     setCode: -1,
+    finish: -1,
+    purchasePrice: -1,
   };
 
   header.forEach((raw, index) => {
@@ -198,4 +205,24 @@ function normalizeName(name: string): string {
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+/** Archidekt finishes: Normal, Foil, Etched. Etched is priced like foil. */
+export function isFoilFinish(value: string): boolean {
+  const finish = value.trim().toLowerCase();
+  return finish === "foil" || finish === "etched" || (finish.includes("foil") && !finish.includes("non"));
+}
+
+/** "1.50", "1,50", "€1.50" → 1.5. Empty or invalid → null. */
+export function parsePrice(value: string): number | null {
+  const cleaned = value.trim().replace(/[^0-9.,-]/g, "");
+  if (!cleaned) return null;
+  // A lone comma is a decimal separator ("1,50"); with a dot present it groups thousands.
+  const normalized = cleaned.includes(".") ? cleaned.replace(/,/g, "") : cleaned.replace(",", ".");
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
 }

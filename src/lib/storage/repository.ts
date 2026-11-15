@@ -34,6 +34,12 @@ export interface DeckRepository {
   setInventoryQuantity(oracleId: string, quantity: number): Promise<void>;
   /** Upsert many inventory rows (collection import). Quantity ≤ 0 removes the row. */
   setInventoryItems(items: InventoryItem[]): Promise<void>;
+  /**
+   * Store foil counts and purchase totals (quantity is written as given).
+   * Resolves false when the backend cannot hold them yet (missing Supabase
+   * columns — see supabase/add-price-tracking.sql).
+   */
+  setInventoryDetails(items: InventoryItem[]): Promise<boolean>;
   /** Remove every owned card for the signed-in user. Deck lists are left alone. */
   clearInventory(): Promise<void>;
 

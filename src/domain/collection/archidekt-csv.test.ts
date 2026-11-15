@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parseArchidektCollectionCsv } from "@/domain/collection/archidekt-csv";
 import {
+  isFoilFinish,
+  parseArchidektCollectionCsv,
+  parsePrice,
+} from "@/domain/collection/archidekt-csv";
+import {
+  buildInventoryDetails,
   filterResolvedAgainstOwned,
   mergeCollectionImport,
 } from "@/domain/collection/merge-inventory";
@@ -69,5 +74,53 @@ describe("mergeCollectionImport", () => {
     );
     expect(skippedExisting).toBe(1);
     expect(toAdd).toEqual([{ oracleId: "bbb", quantity: 2 }]);
+  });
+});
+
+describe("finish and purchase price", () => {
+  const PRICED = `Quantity,Name,Finish,Purchase Price,Scryfall Oracle ID
+2,Sol Ring,Normal,1.50,6ad8011d-3471-4369-9d68-b264cc027487
+1,Sol Ring,Foil,"4,00",6ad8011d-3471-4369-9d68-b264cc027487
+1,Arcane Signet,Etched,,a1e1a1b2-0000-4000-8000-000000000001
+`;
+
+  it("counts foil copies and sums purchase prices per oracle id", () => {
+    const result = parseArchidektCollectionCsv(PRICED);
+    expect(result.hasDetails).toBe(true);
+    const sol = result.entries.find((e) => e.name === "Sol Ring");
+    expect(sol).toMatchObject({ quantity: 3, foilQuantity: 1, purchaseEur: 7 });
+    const signet = result.entries.find((e) => e.name === "Arcane Signet");
+    expect(signet).toMatchObject({ foilQuantity: 1, purchaseEur: null });
+  });
+
+  it("marks files without the columns", () => {
+    const result = parseArchidektCollectionCsv("Quantity,Name\n1,Sol Ring\n");
+    expect(result.hasDetails).toBe(false);
+    expect(result.entries[0]).toMatchObject({ foilQuantity: 0, purchaseEur: null });
+  });
+
+  it("reads finishes and price formats", () => {
+    expect(isFoilFinish("Foil")).toBe(true);
+    expect(isFoilFinish("Etched")).toBe(true);
+    expect(isFoilFinish("Normal")).toBe(false);
+    expect(isFoilFinish("Non-foil")).toBe(false);
+    expect(parsePrice("1,50")).toBe(1.5);
+    expect(parsePrice("€2.25")).toBe(2.25);
+    expect(parsePrice("1,234.50")).toBe(1234.5);
+    expect(parsePrice("")).toBeNull();
+  });
+});
+
+describe("buildInventoryDetails", () => {
+  it("clamps foil to the stored quantity and skips cards not in inventory", () => {
+    const items = buildInventoryDetails(
+      [
+        { oracleId: "a", foilQuantity: 3, purchaseEur: 2 },
+        { oracleId: "a", foilQuantity: 0, purchaseEur: 1 },
+        { oracleId: "b", foilQuantity: 1, purchaseEur: null },
+      ],
+      new Map([["a", 2]]),
+    );
+    expect(items).toEqual([{ oracleId: "a", quantity: 2, foilQuantity: 2, purchaseEur: 3 }]);
   });
 });

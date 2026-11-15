@@ -70,7 +70,10 @@ export async function fetchSetNames(): Promise<Map<string, string>> {
  */
 const SERVER_CARD_BATCH = 75;
 
-export async function resolveCardsByScryfallIds(scryfallIds: string[]): Promise<Card[]> {
+export async function resolveCardsByScryfallIds(
+  scryfallIds: string[],
+  options: { fresh?: boolean; onProgress?: (done: number, total: number) => void } = {},
+): Promise<Card[]> {
   if (scryfallIds.length === 0) return [];
   const cards: Card[] = [];
   for (let index = 0; index < scryfallIds.length; index += SERVER_CARD_BATCH) {
@@ -78,13 +81,14 @@ export async function resolveCardsByScryfallIds(scryfallIds: string[]): Promise<
     const response = await fetch("/api/cards/by-scryfall", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scryfallIds: slice }),
+      body: JSON.stringify({ scryfallIds: slice, fresh: options.fresh }),
     });
     const data = (await response.json()) as { cards?: Card[]; error?: string };
     if (!response.ok) {
       throw new Error(data.error ?? "Could not resolve card printings.");
     }
     cards.push(...(data.cards ?? []));
+    options.onProgress?.(Math.min(index + slice.length, scryfallIds.length), scryfallIds.length);
   }
   return cards;
 }

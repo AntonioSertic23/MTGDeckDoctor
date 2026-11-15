@@ -42,6 +42,9 @@ Header badge: **Cloud** = Supabase env present, **Local** = IndexedDB only.
    alter table public.decks add column if not exists times_brought integer not null default 0;
    alter table public.decks add column if not exists times_played integer not null default 0;
    ```
+   For card prices on the Collection page (foil prices, foil copies, what you paid), also run
+   [`supabase/add-price-tracking.sql`](./supabase/add-price-tracking.sql). The app works without it, but
+   foil prices and purchase totals are not stored until it runs.
 6. Copy Project URL and Publishable (or legacy anon) key from **Project Settings → API**.
 7. Create `.env.local` from `.env.example`:
 
@@ -59,6 +62,18 @@ Use the **Publishable** key (not the Secret key). Legacy `anon` JWT still works 
 8. Restart `npm run dev`. Badge should show **Cloud**; you will be asked to sign in.
 
 Without those env vars the app keeps using IndexedDB (Local).
+
+## Card prices
+
+- Prices are Cardmarket EUR trend prices via Scryfall, for the exact printing in your collection
+  (`eur`, and `eur_foil` for foil / etched copies). No Cardmarket API key is needed.
+- The Collection page shows the **value of what is currently listed** — change the set, color, type
+  or role filter and the total follows. With "missing" on for a set, it also shows what the missing
+  cards would cost.
+- Prices older than 24 hours refresh automatically when you open Collection (or use **Refresh prices**).
+- From an Archidekt CSV the import reads **Finish** (Foil / Etched copies are priced at the foil price)
+  and **Purchase Price** (shown as *Paid* next to the current value). Re-importing the same export
+  updates these details without changing quantities.
 
 ## Develop
 

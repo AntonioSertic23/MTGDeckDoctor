@@ -1,8 +1,10 @@
 import { parseArchidektCollectionCsv } from "@/domain/collection/archidekt-csv";
 import { parseArchidektCollection, preferPrintings } from "@/domain/import/archidekt-collection";
 import {
+  buildInventoryDetails,
   filterResolvedAgainstOwned,
   mergeCollectionImport,
+  type InventoryDetailSource,
 } from "@/domain/collection/merge-inventory";
 import type { Card, InventoryItem } from "@/domain/types";
 import { resolveCardLookups, resolveCardsByOracleIds } from "@/lib/cards/client";
@@ -27,6 +29,14 @@ export interface CollectionImportResult {
   distinctInFile: number;
   /** Stored card art replaced with the Scryfall printing from the file. */
   printingsUpdated: number;
+  /**
+   * Foil counts / purchase prices: true when saved, false when the database
+   * lacks the columns (run supabase/add-price-tracking.sql), null when the
+   * file has neither column.
+   */
+  detailsStored: boolean | null;
+  /** Foil or etched copies in the file. */
+  foilCopies: number;
 }
 
 /**
@@ -62,6 +72,11 @@ export async function importArchidektCollectionCsv(
   let skippedExisting = merge.skippedExisting;
   const unresolvedNames: string[] = [];
   const cardsToCache: Card[] = [];
+  const detailSources: InventoryDetailSource[] = parsed.entries.flatMap((entry) =>
+    entry.oracleId
+      ? [{ oracleId: entry.oracleId, foilQuantity: entry.foilQuantity, purchaseEur: entry.purchaseEur }]
+      : [],
+  );
 
   const needOracleArt = toAdd.filter((item) => !ownedPrintings.has(item.oracleId));
   if (needOracleArt.length > 0) {
@@ -112,6 +127,11 @@ export async function importArchidektCollectionCsv(
         if (!unresolvedNames.includes(entry.name)) unresolvedNames.push(entry.name);
         continue;
       }
+      detailSources.push({
+        oracleId: card.oracleId,
+        foilQuantity: entry.foilQuantity,
+        purchaseEur: entry.purchaseEur,
+      });
       const existingQty = resolvedItems.find((item) => item.oracleId === card.oracleId);
       if (existingQty) existingQty.quantity += entry.quantity;
       else resolvedItems.push({ oracleId: card.oracleId, quantity: entry.quantity });
@@ -145,6 +165,16 @@ export async function importArchidektCollectionCsv(
     }
   }
 
+  let detailsStored: boolean | null = null;
+  if (parsed.hasDetails) {
+    // Existing rows keep their quantity; only foil count and purchase total change.
+    const quantities = new Map(existing.map((item) => [item.oracleId, item.quantity]));
+    for (const item of toAdd) quantities.set(item.oracleId, item.quantity);
+    const details = buildInventoryDetails(detailSources, quantities);
+    report("save", `Saving foil copies and purchase prices for ${details.length} card(s)…`);
+    detailsStored = await repo.setInventoryDetails(details);
+  }
+
   report("done", "Import finished.");
 
   return {
@@ -155,6 +185,8 @@ export async function importArchidektCollectionCsv(
     rowCount: parsed.rowCount,
     distinctInFile: parsed.entries.length,
     printingsUpdated: owned.updated,
+    detailsStored,
+    foilCopies: parsed.entries.reduce((sum, entry) => sum + entry.foilQuantity, 0),
   };
 }
 

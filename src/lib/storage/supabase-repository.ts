@@ -30,6 +30,8 @@ interface CardRow {
   rarity: string;
   price_usd: string | null;
   price_eur: string | null;
+  /** Added by supabase/add-price-tracking.sql. */
+  price_eur_foil?: string | null;
   legalities: Record<string, string>;
   updated_at: string;
 }
@@ -73,7 +75,7 @@ function toCard(row: CardRow): Card {
     imageUri: row.image_uri,
     setCode: row.set_code,
     rarity: row.rarity,
-    prices: { usd: row.price_usd, eur: row.price_eur },
+    prices: { usd: row.price_usd, eur: row.price_eur, eurFoil: row.price_eur_foil ?? null },
     legalities: row.legalities ?? {},
     updatedAt: row.updated_at,
   };
@@ -99,9 +101,22 @@ function fromCard(card: Card): CardRow {
     rarity: card.rarity,
     price_usd: card.prices.usd,
     price_eur: card.prices.eur,
+    ...(priceTracking.cardFoilColumn ? { price_eur_foil: card.prices.eurFoil ?? null } : {}),
     legalities: card.legalities,
     updated_at: card.updatedAt || new Date().toISOString(),
   };
+}
+
+/**
+ * Price-tracking columns are optional until supabase/add-price-tracking.sql
+ * runs. The first "unknown column" error switches the matching feature off
+ * for this session instead of failing the whole write.
+ */
+const priceTracking = { cardFoilColumn: true, inventoryDetailColumns: true };
+
+function isMissingColumnError(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  return error.code === "PGRST204" || error.code === "42703" || /column .* does not exist|could not find the .* column/i.test(error.message ?? "");
 }
 
 function toDeck(row: DeckRow): Deck {
@@ -373,9 +388,15 @@ export const supabaseRepository: DeckRepository = {
     const supabase = getSupabaseBrowserClient();
     await requireUserId();
     for (const chunk of chunkIds(cards, UPSERT_CHUNK)) {
-      const { error } = await supabase.from("cards").upsert(chunk.map(fromCard), {
+      let { error } = await supabase.from("cards").upsert(chunk.map(fromCard), {
         onConflict: "oracle_id",
       });
+      if (error && priceTracking.cardFoilColumn && isMissingColumnError(error)) {
+        priceTracking.cardFoilColumn = false;
+        ({ error } = await supabase.from("cards").upsert(chunk.map(fromCard), {
+          onConflict: "oracle_id",
+        }));
+      }
       if (error) throw error;
     }
   },
@@ -383,18 +404,70 @@ export const supabaseRepository: DeckRepository = {
   async listInventory() {
     const supabase = getSupabaseBrowserClient();
     const userId = await requireUserId();
-    const data = await fetchAllRows<{ oracle_id: string; quantity: number }>((from, to) =>
-      supabase
-        .from("inventory_items")
-        .select("oracle_id, quantity")
-        .eq("user_id", userId)
-        .order("oracle_id")
-        .range(from, to),
-    );
+    type InventoryRow = {
+      oracle_id: string;
+      quantity: number;
+      foil_quantity?: number | null;
+      purchase_eur?: number | string | null;
+    };
+    const load = (columns: string) =>
+      fetchAllRows<InventoryRow>((from, to) =>
+        supabase
+          .from("inventory_items")
+          .select(columns)
+          .eq("user_id", userId)
+          .order("oracle_id")
+          .range(from, to) as unknown as PromiseLike<{
+            data: InventoryRow[] | null;
+            error: { message: string; code?: string } | null;
+          }>,
+      );
+
+    let data: InventoryRow[];
+    if (priceTracking.inventoryDetailColumns) {
+      try {
+        data = await load("oracle_id, quantity, foil_quantity, purchase_eur");
+      } catch (error) {
+        if (!isMissingColumnError(error as { code?: string; message?: string })) throw error;
+        priceTracking.inventoryDetailColumns = false;
+        data = await load("oracle_id, quantity");
+      }
+    } else {
+      data = await load("oracle_id, quantity");
+    }
+
     return data.map((row) => ({
       oracleId: row.oracle_id,
       quantity: row.quantity,
+      foilQuantity: row.foil_quantity ?? 0,
+      // numeric columns arrive as strings from PostgREST.
+      purchaseEur:
+        row.purchase_eur === null || row.purchase_eur === undefined ? null : Number(row.purchase_eur),
     }));
+  },
+
+  async setInventoryDetails(items) {
+    if (items.length === 0) return true;
+    if (!priceTracking.inventoryDetailColumns) return false;
+    const supabase = getSupabaseBrowserClient();
+    const userId = await requireUserId();
+    for (const chunk of chunkIds(items.filter((item) => item.quantity > 0), UPSERT_CHUNK)) {
+      const { error } = await supabase.from("inventory_items").upsert(
+        chunk.map((item) => ({
+          user_id: userId,
+          oracle_id: item.oracleId,
+          quantity: item.quantity,
+          foil_quantity: Math.min(item.quantity, Math.max(0, item.foilQuantity ?? 0)),
+          purchase_eur: item.purchaseEur ?? null,
+        })),
+      );
+      if (error && isMissingColumnError(error)) {
+        priceTracking.inventoryDetailColumns = false;
+        return false;
+      }
+      if (error) throw error;
+    }
+    return true;
   },
 
   async setInventoryQuantity(oracleId, quantity) {

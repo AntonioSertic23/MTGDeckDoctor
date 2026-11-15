@@ -75,7 +75,10 @@ export type Color = "W" | "U" | "B" | "R" | "G";
 
 export interface CardPrices {
   usd: string | null;
+  /** Cardmarket trend price (EUR) for the non-foil printing, via Scryfall. */
   eur: string | null;
+  /** Cardmarket price for the foil finish. Missing on cards cached before foil support. */
+  eurFoil?: string | null;
 }
 
 /**
@@ -183,6 +186,10 @@ export interface ResolvedDeckEntry {
 export interface InventoryItem {
   oracleId: string;
   quantity: number;
+  /** How many of `quantity` are foil (from Archidekt's Finish column). */
+  foilQuantity?: number;
+  /** Total paid for the copies that had a purchase price in Archidekt. */
+  purchaseEur?: number | null;
 }
 
 /**

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Check, Copy, Eye, EyeOff, Library, Minus, Plus, Upload, WandSparkles } from "lucide-react";
+import { Check, Copy, Eye, EyeOff, Library, Minus, Plus, RefreshCw, Upload, WandSparkles } from "lucide-react";
 import { CardArt } from "@/components/card-art";
 import { useDialog } from "@/components/dialog";
 import { useToast } from "@/components/toast";
@@ -31,7 +31,9 @@ import {
 import { usePersistedState } from "@/lib/hooks/use-persisted-state";
 import { useInventory } from "@/lib/hooks/use-repository";
 import { getRepository } from "@/lib/storage";
-import { cardEurPrice, cn, formatCardPrices } from "@/lib/utils";
+import { collectionValue, isPriceStale, oldestPriceDate, rowValue } from "@/domain/collection/value";
+import { refreshCardPrices, type RefreshProgress } from "@/lib/collection/refresh-prices";
+import { cardEurPrice, cn, formatCardPrices, formatEur, formatRelative } from "@/lib/utils";
 
 type CollectionSort = "name" | "quantity" | "price" | "manaValue";
 type ColorFilter = "all" | Color | "C";
@@ -156,10 +158,13 @@ interface CollectionRow {
 }
 
 export default function CollectionPage() {
-  const { inventory, cards, loading, error, refresh, setQuantity } = useInventory();
+  const { inventory, cards, loading, error, refresh, setQuantity, applyCards } = useInventory();
+  const [priceRefresh, setPriceRefresh] = useState<RefreshProgress | null>(null);
   const dialog = useDialog();
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
+  const priceRefreshRunning = useRef(false);
+  const autoRefreshDone = useRef(false);
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<CardRole | "all">("all");
   const [sort, setSort] = usePersistedState(SORT_KEY, "name", isCollectionSort);
@@ -343,6 +348,79 @@ export default function CollectionPage() {
     [inventory],
   );
 
+  const filtersActive =
+    query.trim() !== "" ||
+    setFilter !== "all" ||
+    colorFilter !== "all" ||
+    typeFilter !== "all" ||
+    roleFilter !== "all";
+
+  // Value of exactly what the filters show, so a set / color / type filter
+  // answers "what is this part of my collection worth?".
+  const shownValue = useMemo(
+    () =>
+      collectionValue(
+        filtered
+          .filter((row) => !row.missing)
+          .map((row) => ({
+            card: row.card,
+            quantity: row.item.quantity,
+            foilQuantity: row.item.foilQuantity,
+            purchaseEur: row.item.purchaseEur,
+          })),
+      ),
+    [filtered],
+  );
+
+  // One non-foil copy of each missing card that matches the filters.
+  const missingValue = useMemo(
+    () =>
+      collectionValue(
+        filtered.filter((row) => row.missing).map((row) => ({ card: row.card, quantity: 1 })),
+      ),
+    [filtered],
+  );
+
+  const ownedCards = useMemo(
+    () => inventory.map((item) => cards.get(item.oracleId)).filter((card): card is Card => Boolean(card)),
+    [inventory, cards],
+  );
+  const pricesFrom = useMemo(() => oldestPriceDate(ownedCards), [ownedCards]);
+
+  const runPriceRefresh = useCallback(
+    async (targets: Card[], announce: boolean) => {
+      if (targets.length === 0 || priceRefreshRunning.current) return;
+      priceRefreshRunning.current = true;
+      try {
+        const result = await refreshCardPrices(targets, {
+          onProgress: setPriceRefresh,
+          onBatch: applyCards,
+        });
+        if (announce || result.failed > 0) {
+          toast(
+            result.failed > 0
+              ? `Updated ${result.refreshed} price(s); ${result.failed} could not be refreshed.`
+              : `Updated ${result.refreshed} price(s).`,
+            { tone: result.failed > 0 && result.refreshed === 0 ? "error" : "success" },
+          );
+        }
+      } finally {
+        priceRefreshRunning.current = false;
+        setPriceRefresh(null);
+      }
+    },
+    [applyCards, toast],
+  );
+
+  // Once per visit: refresh prices older than a day in the background.
+  useEffect(() => {
+    if (loading || autoRefreshDone.current || ownedCards.length === 0) return;
+    autoRefreshDone.current = true;
+    const now = Date.now();
+    const stale = ownedCards.filter((card) => isPriceStale(card, now));
+    void runPriceRefresh(stale, false);
+  }, [loading, ownedCards, runPriceRefresh]);
+
   const missingInSet = useMemo(() => {
     if (setFilter === "all" || setCards.length === 0) return [] as Card[];
     return setCards
@@ -466,14 +544,58 @@ export default function CollectionPage() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <StatChip label="Unique cards" value={inventory.length} />
         <StatChip label="Total copies" value={totalCopies} />
         <StatChip label="Showing" value={filtered.length} />
+        <StatChip
+          label={filtersActive ? "Value shown" : "Value"}
+          value={formatEur(shownValue.totalEur)}
+          hint={valueHint(shownValue.foilCopies, shownValue.unpricedCopies)}
+        />
+        {shownValue.paidEur !== null ? (
+          <StatChip
+            label="Paid"
+            value={formatEur(shownValue.paidEur)}
+            hint={paidHint(shownValue.paidEur, shownValue.paidRowsValueEur ?? 0, shownValue.paidRows)}
+          />
+        ) : null}
         {showMissing && setFilter !== "all" ? (
-          <StatChip label="Missing in set" value={missingCount} />
+          <StatChip
+            label="Missing in set"
+            value={missingCount}
+            hint={
+              missingValue.pricedCopies > 0
+                ? `≈ ${formatEur(missingValue.totalEur)} to complete`
+                : undefined
+            }
+          />
         ) : null}
       </div>
+
+      {inventory.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
+          <span>
+            Cardmarket prices (EUR) via Scryfall
+            {pricesFrom ? ` · oldest from ${formatRelative(pricesFrom)}` : ""}
+          </span>
+          {priceRefresh ? (
+            <span className="tabular-nums" aria-live="polite">
+              Updating prices {priceRefresh.done}/{priceRefresh.total}…
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 font-medium text-accent-strong hover:underline disabled:opacity-50"
+              disabled={importing}
+              onClick={() => void runPriceRefresh(ownedCards, true)}
+            >
+              <RefreshCw className="h-3 w-3" aria-hidden />
+              Refresh prices
+            </button>
+          )}
+        </div>
+      ) : null}
 
       {(importMessage || lastImport) && (
         <Panel className="space-y-1 text-sm">
@@ -486,6 +608,18 @@ export default function CollectionPage() {
                 ? ` · ${lastImport.unresolvedNames.length} unresolved`
                 : ""}
               {lastImport.ignoredRows > 0 ? ` · ${lastImport.ignoredRows} ignored` : ""}
+            </p>
+          ) : null}
+          {lastImport && lastImport.detailsStored === true ? (
+            <p className="text-xs text-muted">
+              Saved {lastImport.foilCopies} foil cop{lastImport.foilCopies === 1 ? "y" : "ies"} and
+              purchase prices from the file.
+            </p>
+          ) : null}
+          {lastImport && lastImport.detailsStored === false ? (
+            <p className="text-xs text-amber-700 dark:text-amber-300">
+              Foil copies and purchase prices were not saved: the database is missing the new
+              columns. Run supabase/add-price-tracking.sql in Supabase, then import again.
             </p>
           ) : null}
           {lastImport && lastImport.unresolvedNames.length > 0 ? (
@@ -679,10 +813,25 @@ export default function CollectionPage() {
 
       <p className="flex items-center gap-2 text-xs text-muted">
         <Library className="h-3.5 w-3.5" aria-hidden />
-        Archidekt CSV only for now. Foil and normal printings of the same card count as one oracle entry.
+        Archidekt CSV only for now. Printings of the same card count as one entry; foil copies are
+        priced at the foil price.
       </p>
     </div>
   );
+}
+
+function valueHint(foilCopies: number, unpricedCopies: number): string | undefined {
+  const parts: string[] = [];
+  if (foilCopies > 0) parts.push(`${foilCopies} foil`);
+  if (unpricedCopies > 0) parts.push(`${unpricedCopies} without price`);
+  return parts.length > 0 ? parts.join(" · ") : undefined;
+}
+
+/** "now €12.40 (+24%) · 30 cards" — current value of the cards that have a purchase price. */
+function paidHint(paid: number, now: number, rows: number): string {
+  const change = paid > 0 ? Math.round(((now - paid) / paid) * 100) : null;
+  const sign = change !== null && change > 0 ? "+" : "";
+  return `now ${formatEur(now)}${change !== null ? ` (${sign}${change}%)` : ""} · ${rows} card${rows === 1 ? "" : "s"}`;
 }
 
 function compareName(a: CollectionRow, b: CollectionRow): number {
@@ -699,9 +848,17 @@ function CollectionCardTile({
   onQuantityChange: (quantity: number) => void;
 }) {
   const name = row.card?.name ?? "Unknown card";
-  const price = formatCardPrices(row.card?.prices);
-  const roleLabel = row.roles[0] ? CARD_ROLE_LABELS[row.roles[0]] : null;
   const missing = Boolean(row.missing);
+  const value = missing
+    ? null
+    : rowValue({ card: row.card, quantity: row.item.quantity, foilQuantity: row.item.foilQuantity });
+  // Owned: total for all copies (foil at foil price). Missing: one copy.
+  const price =
+    value && value.pricedCopies > 0
+      ? formatEur(Math.round(value.valueEur * 100) / 100)
+      : formatCardPrices(row.card?.prices);
+  const foilCopies = value?.foilCopies ?? 0;
+  const roleLabel = row.roles[0] ? CARD_ROLE_LABELS[row.roles[0]] : null;
 
   return (
     <li className={cn("min-w-0", missing && "opacity-40")}>
@@ -769,9 +926,29 @@ function CollectionCardTile({
         </div>
         <div className="flex items-baseline justify-between gap-2 text-[11px] text-muted">
           <span className="truncate">{row.card?.manaCost || "—"}</span>
-          {price ? <span className="shrink-0 tabular-nums">{price}</span> : null}
+          {price ? (
+            <span
+              className="shrink-0 tabular-nums"
+              title={
+                !missing && row.item.quantity > 1
+                  ? `${row.item.quantity} copies${foilCopies ? `, ${foilCopies} foil` : ""}`
+                  : undefined
+              }
+            >
+              {price}
+            </span>
+          ) : null}
         </div>
-        {roleLabel ? <div className="truncate text-[11px] text-ink-muted">{roleLabel}</div> : null}
+        {roleLabel || foilCopies > 0 ? (
+          <div className="flex items-center justify-between gap-2 text-[11px] text-ink-muted">
+            <span className="truncate">{roleLabel}</span>
+            {foilCopies > 0 ? (
+              <span className="shrink-0 rounded bg-gradient-to-r from-amber-400/25 via-fuchsia-400/25 to-sky-400/25 px-1 font-semibold text-ink">
+                {foilCopies === row.item.quantity ? "Foil" : `${foilCopies} foil`}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </li>
   );

@@ -256,7 +256,11 @@ export function useInventory() {
           quantity <= 0
             ? prev.filter((item) => item.oracleId !== oracleId)
             : prev.some((item) => item.oracleId === oracleId)
-              ? prev.map((item) => (item.oracleId === oracleId ? { oracleId, quantity } : item))
+              ? prev.map((item) =>
+                  item.oracleId === oracleId
+                    ? { ...item, quantity, foilQuantity: Math.min(quantity, item.foilQuantity ?? 0) }
+                    : item,
+                )
               : [...prev, { oracleId, quantity }];
         if (inventoryCache) inventoryCache = { ...inventoryCache, inventory: next };
         return next;
@@ -271,5 +275,16 @@ export function useInventory() {
     [refresh],
   );
 
-  return { inventory, cards, loading, error, refresh, setQuantity };
+  /** Merge freshly fetched cards (e.g. refreshed prices) into the page state. */
+  const applyCards = useCallback((fresh: Card[]) => {
+    if (fresh.length === 0) return;
+    setCards((prev) => {
+      const next = new Map(prev);
+      for (const card of fresh) next.set(card.oracleId, card);
+      if (inventoryCache) inventoryCache = { ...inventoryCache, cards: next };
+      return next;
+    });
+  }, []);
+
+  return { inventory, cards, loading, error, refresh, setQuantity, applyCards };
 }

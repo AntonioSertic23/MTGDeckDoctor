@@ -272,7 +272,7 @@ interface ScryfallCard {
   set?: string;
   collector_number?: string;
   rarity?: string;
-  prices?: { usd?: string | null; eur?: string | null };
+  prices?: { usd?: string | null; eur?: string | null; eur_foil?: string | null };
   legalities?: Record<string, string>;
   image_uris?: { normal?: string; large?: string; small?: string };
   card_faces?: ScryfallFace[];
@@ -317,7 +317,11 @@ export function mapScryfallCard(raw: ScryfallCard): Card {
     setCode: raw.set ?? "",
     collectorNumber: raw.collector_number ?? undefined,
     rarity: raw.rarity ?? "",
-    prices: { usd: raw.prices?.usd ?? null, eur: raw.prices?.eur ?? null },
+    prices: {
+      usd: raw.prices?.usd ?? null,
+      eur: raw.prices?.eur ?? null,
+      eurFoil: raw.prices?.eur_foil ?? null,
+    },
     legalities: raw.legalities ?? {},
     updatedAt: new Date().toISOString(),
   };
@@ -458,13 +462,14 @@ export const scryfallProvider: CardProvider = {
     return this.findByLookups(names.map((name) => ({ name })));
   },
 
-  async getByScryfallIds(scryfallIds) {
+  async getByScryfallIds(scryfallIds, options = {}) {
     const unique = dedupe(scryfallIds);
     const cards: Card[] = [];
     const misses: string[] = [];
 
     for (const id of unique) {
-      const cached = readCacheByScryfallId(id);
+      // Price refreshes skip the in-memory cache, which can be days old.
+      const cached = options.fresh ? null : readCacheByScryfallId(id);
       if (cached) cards.push(cached);
       else misses.push(id);
     }

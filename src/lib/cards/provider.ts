@@ -21,7 +21,8 @@ export interface CardProvider {
   findByNames(names: string[]): Promise<{ cards: Card[]; notFound: string[] }>;
   getByOracleIds(oracleIds: string[]): Promise<Card[]>;
   /** Exact printing lookup. Scryfall ids identify one set / collector, not the oracle card. */
-  getByScryfallIds(scryfallIds: string[]): Promise<Card[]>;
+  /** `fresh` bypasses any in-memory cache (used to refresh prices). */
+  getByScryfallIds(scryfallIds: string[], options?: { fresh?: boolean }): Promise<Card[]>;
   search(query: string, limit?: number): Promise<Card[]>;
   /** Every unique card printed in a set (paginated Scryfall search). */
   listBySet(setCode: string): Promise<Card[]>;

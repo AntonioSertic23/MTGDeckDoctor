@@ -63,3 +63,40 @@ export function filterResolvedAgainstOwned(
 
   return { toAdd, skippedExisting };
 }
+
+export interface InventoryDetailSource {
+  oracleId: string;
+  foilQuantity: number;
+  purchaseEur: number | null;
+}
+
+/**
+ * Foil counts and purchase totals from an import, for every card that ends up
+ * in inventory. `quantities` is the stored quantity per oracle id (existing
+ * rows keep theirs), and foil copies never exceed it.
+ */
+export function buildInventoryDetails(
+  sources: InventoryDetailSource[],
+  quantities: Map<string, number>,
+): InventoryItem[] {
+  const merged = new Map<string, { foil: number; paid: number | null }>();
+  for (const source of sources) {
+    const current = merged.get(source.oracleId) ?? { foil: 0, paid: null };
+    current.foil += source.foilQuantity;
+    if (source.purchaseEur !== null) current.paid = (current.paid ?? 0) + source.purchaseEur;
+    merged.set(source.oracleId, current);
+  }
+
+  const items: InventoryItem[] = [];
+  for (const [oracleId, detail] of merged) {
+    const quantity = quantities.get(oracleId) ?? 0;
+    if (quantity <= 0) continue;
+    items.push({
+      oracleId,
+      quantity,
+      foilQuantity: Math.min(quantity, detail.foil),
+      purchaseEur: detail.paid === null ? null : Math.round(detail.paid * 100) / 100,
+    });
+  }
+  return items;
+}
